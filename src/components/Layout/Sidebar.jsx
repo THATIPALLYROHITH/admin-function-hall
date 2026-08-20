@@ -4,6 +4,7 @@ import {
   MessageSquareText, 
   CalendarDays, 
   CalendarCheck, 
+  Wallet,
   Users, 
   Settings, 
   Building2, 
@@ -33,6 +34,7 @@ export default function Sidebar({
       badgeVariant: 'badge-new'
     },
     { id: 'bookings', label: 'Bookings', icon: CalendarCheck, badge: null },
+    { id: 'accounts', label: 'Accounts', icon: Wallet, badge: null },
     { id: 'calendar', label: 'Calendar', icon: CalendarDays, badge: null },
     { id: 'customers', label: 'Customers', icon: Users, badge: null },
     { id: 'settings', label: 'Settings', icon: Settings, badge: null },

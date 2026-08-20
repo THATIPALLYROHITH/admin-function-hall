@@ -16,6 +16,7 @@ const TAB_TITLES = {
   dashboard: { title: 'Owner Dashboard', subtitle: 'Overview of enquiries, hall reservations, and venue status' },
   enquiries: { title: 'Enquiries Manager', subtitle: 'Customer enquiries submitted for weddings, receptions & events' },
   bookings: { title: 'Bookings & Reservations', subtitle: 'Track pending, confirmed, and cancelled event slots' },
+  accounts: { title: 'Accounts & Finance', subtitle: 'Live revenue, operational expenses, net profit, and receivables' },
   calendar: { title: 'Hall Availability Calendar', subtitle: 'Interactive view of booked dates, slots and maintenance schedules' },
   customers: { title: 'Customer Directory', subtitle: 'Customer contact records, event history, and organizers' },
   settings: { title: 'Venue & Admin Settings', subtitle: 'Hall slot pricing, venue timing, and system configuration' },

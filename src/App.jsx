@@ -7,6 +7,7 @@ import Header from './components/Layout/Header';
 import DashboardView from './components/Dashboard/DashboardView';
 import EnquiriesView from './components/Enquiries/EnquiriesView';
 import BookingsView from './components/Bookings/BookingsView';
+import AccountsDashboardView from './components/Accounts/AccountsDashboardView';
 import CalendarView from './components/Calendar/CalendarView';
 import CustomersView from './components/Customers/CustomersView';
 import SettingsView from './components/Settings/SettingsView';
@@ -43,6 +44,8 @@ function AdminAppContent() {
         return <EnquiriesView />;
       case 'bookings':
         return <BookingsView />;
+      case 'accounts':
+        return <AccountsDashboardView />;
       case 'calendar':
         return <CalendarView />;
       case 'customers':
