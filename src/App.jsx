@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { EnquiriesProvider } from './context/EnquiriesContext';
+import { BookingsProvider } from './context/BookingsContext';
 import LoginPage from './components/Login/LoginPage';
 import Sidebar from './components/Layout/Sidebar';
 import Header from './components/Layout/Header';
@@ -88,7 +89,9 @@ export default function App() {
   return (
     <AuthProvider>
       <EnquiriesProvider>
-        <AdminAppContent />
+        <BookingsProvider>
+          <AdminAppContent />
+        </BookingsProvider>
       </EnquiriesProvider>
     </AuthProvider>
   );

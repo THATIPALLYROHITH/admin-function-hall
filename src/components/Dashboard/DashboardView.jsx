@@ -20,15 +20,35 @@ import {
   Phone
 } from 'lucide-react';
 import { useEnquiries } from '../../context/EnquiriesContext';
+import { useBookings } from '../../context/BookingsContext';
 import StatCard from './StatCard';
 import EmptyState from '../Common/EmptyState';
 import './DashboardView.css';
 
 export default function DashboardView({ onNavigate }) {
   const { enquiries } = useEnquiries();
+  const { bookings } = useBookings();
   const [selectedEnquiryCategory, setSelectedEnquiryCategory] = useState('all');
 
   const newEnquiriesCount = enquiries.filter((e) => e.status.toLowerCase() === 'new').length;
+
+  // Live booking counts from Firestore
+  const pendingBookingsCount = bookings.filter(
+    (b) => (b.bookingStatus || '').toLowerCase() === 'tentative'
+  ).length;
+  const confirmedBookingsCount = bookings.filter(
+    (b) => (b.bookingStatus || '').toLowerCase() === 'confirmed'
+  ).length;
+  const cancelledBookingsCount = bookings.filter(
+    (b) => (b.bookingStatus || '').toLowerCase() === 'cancelled'
+  ).length;
+  const upcomingEventsCount = bookings.filter((b) => {
+    const isActive =
+      (b.bookingStatus || '').toLowerCase() === 'confirmed' ||
+      (b.bookingStatus || '').toLowerCase() === 'tentative';
+    const isUpcoming = b.eventDate >= new Date().toISOString().slice(0, 10);
+    return isActive && isUpcoming;
+  }).length;
 
   const filteredFeedEnquiries = enquiries.filter((item) => {
     if (selectedEnquiryCategory === 'all') return true;
@@ -68,7 +88,7 @@ export default function DashboardView({ onNavigate }) {
         />
         <StatCard
           title="Pending Bookings"
-          count={0}
+          count={pendingBookingsCount}
           icon={Clock}
           variant="pending"
           badgeText="In Review"
@@ -77,7 +97,7 @@ export default function DashboardView({ onNavigate }) {
         />
         <StatCard
           title="Confirmed Bookings"
-          count={0}
+          count={confirmedBookingsCount}
           icon={CheckCircle2}
           variant="confirmed"
           badgeText="Approved"
@@ -86,7 +106,7 @@ export default function DashboardView({ onNavigate }) {
         />
         <StatCard
           title="Cancelled Bookings"
-          count={0}
+          count={cancelledBookingsCount}
           icon={XCircle}
           variant="cancelled"
           badgeText="Archived"
@@ -95,11 +115,11 @@ export default function DashboardView({ onNavigate }) {
         />
         <StatCard
           title="Upcoming Events"
-          count={0}
+          count={upcomingEventsCount}
           icon={CalendarCheck2}
           variant="event"
           badgeText="Scheduled"
-          subtitle="Functions planned for this month"
+          subtitle="Active bookings from today onwards"
           onClick={() => onNavigate('calendar')}
         />
       </div>
