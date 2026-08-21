@@ -63,6 +63,7 @@ export default function BookingModal({ isOpen, onClose, onSave, existingBooking 
   const [enquiryId, setEnquiryId] = useState('');
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [advancePaymentMethod, setAdvancePaymentMethod] = useState('Cash');
 
   // Derived balance preview
   const balancePreview = Math.max(0, (Number(totalAmount) || 0) - (Number(totalPaid) || 0));
@@ -98,6 +99,7 @@ export default function BookingModal({ isOpen, onClose, onSave, existingBooking 
     }
     setFormError('');
     setIsSaving(false);
+    setAdvancePaymentMethod('Cash');
   }, [isOpen, isEditMode, existingBooking]);
 
   // ESC key to close
@@ -166,6 +168,9 @@ export default function BookingModal({ isOpen, onClose, onSave, existingBooking 
       estimatedGuests: estimatedGuests ? Number(estimatedGuests) : null,
       notes: notes.trim(),
       enquiryId: enquiryId.trim() || null,
+      // Advance payment method — used by BookingsContext to record the advance
+      // as an actual payment document. Ignored on Edit (Edit doesn't touch totalPaid).
+      advancePaymentMethod,
     };
 
     try {
@@ -417,6 +422,28 @@ export default function BookingModal({ isOpen, onClose, onSave, existingBooking 
                 />
               </div>
             </div>
+
+            {/* Advance Payment Method — only shown in Create mode when advance > 0 */}
+            {!isEditMode && Number(totalPaid) > 0 && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="bm-advance-method">
+                  Advance Payment Method
+                </label>
+                <select
+                  id="bm-advance-method"
+                  value={advancePaymentMethod}
+                  onChange={(e) => setAdvancePaymentMethod(e.target.value)}
+                >
+                  <option value="Cash">Cash</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Other">Other</option>
+                </select>
+                <span style={{ fontSize: '11px', color: 'var(--text-disabled)', marginTop: '3px', display: 'block' }}>
+                  This advance will be recorded as a payment in the payment history.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Balance Preview */}

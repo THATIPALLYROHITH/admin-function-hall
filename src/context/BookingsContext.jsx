@@ -6,6 +6,7 @@ import {
   updateBookingStatus as svcUpdateBookingStatus,
   deleteBooking as svcDeleteBooking,
 } from '../services/bookingsService';
+import { createPayment } from '../services/paymentsService';
 import { useAuth } from './AuthContext';
 
 const BookingsContext = createContext(null);
@@ -46,11 +47,35 @@ export function BookingsProvider({ children }) {
     };
   }, [isAuthenticated, isAuthLoading]);
 
-  // Create a new booking
+  // Create a new booking, recording any advance as a real payment document
   const createBooking = async (data) => {
     try {
       setError(null);
-      const created = await svcCreateBooking(data);
+
+      const advanceAmount = Number(data.totalPaid) || 0;
+      const advanceMethod = data.advancePaymentMethod || 'Cash';
+
+      // Always create the booking with totalPaid = 0.
+      // The advance (if any) is recorded below as a payment document via createPayment(),
+      // which atomically updates the booking's totalPaid / balanceAmount / paymentStatus.
+      // This ensures the payments collection is the single source of truth.
+      const bookingPayload = { ...data, totalPaid: 0 };
+      const created = await svcCreateBooking(bookingPayload);
+
+      // If an advance was provided, record it as a real payment in the payments collection.
+      // createPayment() atomically updates the booking totals — no double-counting.
+      if (advanceAmount > 0) {
+        await createPayment({
+          bookingId: created.id,
+          customerName: data.customerName?.trim() || '',
+          amount: advanceAmount,
+          paymentDate: new Date().toISOString().slice(0, 10),
+          paymentMethod: advanceMethod,
+          transactionReference: '',
+          notes: 'Advance payment recorded at booking',
+        });
+      }
+
       return created;
     } catch (err) {
       setError(err.message || 'Failed to create booking.');

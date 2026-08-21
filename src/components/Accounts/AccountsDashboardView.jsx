@@ -18,13 +18,35 @@ import {
   RefreshCw, 
   CheckCircle2,
   XCircle,
-  HelpCircle
+  HelpCircle,
+  Plus,
+  Edit2,
+  Trash2,
+  Tag,
+  Search,
+  Hash,
+  User,
+  FileText,
+  Ban
 } from 'lucide-react';
-import { subscribePayments } from '../../services/paymentsService';
-import { subscribeExpenses, EXPENSE_CATEGORIES } from '../../services/expensesService';
+import {
+  subscribePayments,
+  createPayment,
+  voidPayment,
+  INCOME_CATEGORIES
+} from '../../services/paymentsService';
+import {
+  subscribeExpenses,
+  createExpense,
+  updateExpense,
+  deleteExpense,
+  EXPENSE_CATEGORIES
+} from '../../services/expensesService';
 import { subscribeBookings } from '../../services/bookingsService';
 import { calculateFinancialSummary } from '../../services/accountsReportsService';
 import { useAuth } from '../../context/AuthContext';
+import ExpenseModal from './ExpenseModal';
+import IncomeModal from './IncomeModal';
 import EmptyState from '../Common/EmptyState';
 import './AccountsDashboardView.css';
 
@@ -38,6 +60,146 @@ export function formatINR(val) {
   }).format(num);
 }
 
+function formatDateDisplay(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// Delete Expense Confirmation Dialog Component
+function DeleteExpenseDialog({ expense, onConfirm, onCancel }) {
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  return (
+    <div className="confirm-dialog-overlay animate-fade-in">
+      <div className="confirm-dialog-box" style={{ borderColor: 'rgba(244, 63, 94, 0.4)' }}>
+        <div className="confirm-dialog-icon">
+          <Trash2 size={22} />
+        </div>
+        <div className="confirm-dialog-title">Delete Expense Record?</div>
+        <div className="confirm-dialog-desc">
+          You are about to permanently delete the expense of{' '}
+          <strong style={{ color: 'var(--text-primary)' }}>
+            {formatINR(expense?.amount)} ({expense?.category})
+          </strong>
+          {expense?.expenseDate ? ` on ${formatDateDisplay(expense.expenseDate)}` : ''}.
+          This will adjust total expenses and net profit. This action cannot be undone.
+        </div>
+        <div className="confirm-dialog-actions">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onCancel}
+            disabled={isDeleting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger btn-sm"
+            disabled={isDeleting}
+            onClick={async () => {
+              setIsDeleting(true);
+              try {
+                await onConfirm();
+              } catch {
+                setIsDeleting(false);
+              }
+            }}
+          >
+            {isDeleting ? (
+              <>
+                <div className="spinner" style={{ width: '12px', height: '12px', borderWidth: '2px' }} />
+                <span>Deleting...</span>
+              </>
+            ) : (
+              <span>Yes, Delete</span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Void Payment Confirmation Dialog Component
+function VoidIncomeDialog({ payment, onConfirm, onCancel }) {
+  const [reason, setReason] = useState('Cancelled by administrator');
+  const [isVoiding, setIsVoiding] = useState(false);
+
+  return (
+    <div className="confirm-dialog-overlay animate-fade-in">
+      <div className="confirm-dialog-box" style={{ borderColor: 'rgba(244, 63, 94, 0.4)' }}>
+        <div className="confirm-dialog-icon" style={{ backgroundColor: 'rgba(244, 63, 94, 0.1)', color: '#fb7185' }}>
+          <Ban size={22} />
+        </div>
+        <div className="confirm-dialog-title">Void Income Receipt?</div>
+        <div className="confirm-dialog-desc">
+          You are about to void the income receipt of{' '}
+          <strong style={{ color: 'var(--text-primary)' }}>
+            {formatINR(payment?.amount)} ({payment?.category || (payment?.bookingId ? 'Hall Booking' : 'Other Income')})
+          </strong>
+          . This receipt will be preserved as an immutable audit record but excluded from revenue calculations.
+        </div>
+
+        <div style={{ margin: '14px 0', textAlign: 'left' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>
+            Reason for Voiding <span style={{ color: '#fb7185' }}>*</span>
+          </label>
+          <input
+            type="text"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. Duplicate entry / Cancelled vendor commission"
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              backgroundColor: 'var(--bg-surface-elevated)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md)',
+              color: 'var(--text-primary)',
+              fontSize: '13px'
+            }}
+          />
+        </div>
+
+        <div className="confirm-dialog-actions">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onCancel}
+            disabled={isVoiding}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger btn-sm"
+            disabled={isVoiding || !reason.trim()}
+            onClick={async () => {
+              setIsVoiding(true);
+              try {
+                await onConfirm(reason.trim());
+              } catch {
+                setIsVoiding(false);
+              }
+            }}
+          >
+            {isVoiding ? (
+              <>
+                <div className="spinner" style={{ width: '12px', height: '12px', borderWidth: '2px' }} />
+                <span>Voiding...</span>
+              </>
+            ) : (
+              <span>Yes, Void Receipt</span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AccountsDashboardView() {
   const { isAuthenticated, isAuthLoading } = useAuth();
   
@@ -49,6 +211,36 @@ export default function AccountsDashboardView() {
   const [isLoadingExpenses, setIsLoadingExpenses] = useState(true);
   const [isLoadingBookings, setIsLoadingBookings] = useState(true);
   const [error, setError] = useState(null);
+
+  // Active Ledger Tab ('expenses' | 'income')
+  const [activeLedgerTab, setActiveLedgerTab] = useState('expenses');
+
+  // Modals & Dialogs state
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [deletingExpense, setDeletingExpense] = useState(null);
+  const [voidingPayment, setVoidingPayment] = useState(null);
+
+  // Filters & Search
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('all');
+  const [incomeCategoryFilter, setIncomeCategoryFilter] = useState('all');
+  const [expenseSearchQuery, setExpenseSearchQuery] = useState('');
+  const [incomeSearchQuery, setIncomeSearchQuery] = useState('');
+
+  // Toasts
+  const [successToast, setSuccessToast] = useState('');
+  const [errorToast, setErrorToast] = useState('');
+
+  const showSuccess = (msg) => {
+    setSuccessToast(msg);
+    setTimeout(() => setSuccessToast(''), 4500);
+  };
+
+  const showError = (msg) => {
+    setErrorToast(msg);
+    setTimeout(() => setErrorToast(''), 5000);
+  };
 
   // Subscribe to real-time Firestore collections
   useEffect(() => {
@@ -145,14 +337,137 @@ export default function AccountsDashboardView() {
     };
   }, [payments, expenses]);
 
+  // Filtered expenses list for ledger table
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter((e) => {
+      if (expenseCategoryFilter !== 'all' && (e.category || '').toLowerCase() !== expenseCategoryFilter.toLowerCase()) {
+        return false;
+      }
+      if (expenseSearchQuery.trim()) {
+        const q = expenseSearchQuery.toLowerCase();
+        return (
+          (e.id || '').toLowerCase().includes(q) ||
+          (e.category || '').toLowerCase().includes(q) ||
+          (e.payee || '').toLowerCase().includes(q) ||
+          (e.description || '').toLowerCase().includes(q) ||
+          (e.paymentMethod || '').toLowerCase().includes(q) ||
+          (e.transactionReference || '').toLowerCase().includes(q) ||
+          (e.notes || '').toLowerCase().includes(q) ||
+          (e.expenseDate || '').includes(q) ||
+          String(e.amount || '').includes(q)
+        );
+      }
+      return true;
+    });
+  }, [expenses, expenseCategoryFilter, expenseSearchQuery]);
+
+  // Filtered income payments list for ledger table
+  const filteredIncomePayments = useMemo(() => {
+    return payments.filter((p) => {
+      const category = p.category || (p.bookingId ? 'Hall Booking' : 'Other Income');
+
+      if (incomeCategoryFilter !== 'all' && category.toLowerCase() !== incomeCategoryFilter.toLowerCase()) {
+        return false;
+      }
+      if (incomeSearchQuery.trim()) {
+        const q = incomeSearchQuery.toLowerCase();
+        return (
+          (p.id || '').toLowerCase().includes(q) ||
+          category.toLowerCase().includes(q) ||
+          (p.customerName || '').toLowerCase().includes(q) ||
+          (p.description || '').toLowerCase().includes(q) ||
+          (p.paymentMethod || '').toLowerCase().includes(q) ||
+          (p.transactionReference || '').toLowerCase().includes(q) ||
+          (p.notes || '').toLowerCase().includes(q) ||
+          (p.paymentDate || '').includes(q) ||
+          String(p.amount || '').includes(q)
+        );
+      }
+      return true;
+    });
+  }, [payments, incomeCategoryFilter, incomeSearchQuery]);
+
   const isLoading = isLoadingPayments || isLoadingExpenses || isLoadingBookings;
   const hasNoFinancialData = payments.length === 0 && expenses.length === 0 && bookings.length === 0;
 
-  // Standard payment methods list for breakdown
-  const PAYMENT_METHODS = ['UPI', 'Cash', 'Bank Transfer', 'Other'];
+  // Expense action handlers
+  const handleOpenAddExpense = () => {
+    setEditingExpense(null);
+    setIsExpenseModalOpen(true);
+  };
+
+  const handleOpenEditExpense = (expense) => {
+    setEditingExpense(expense);
+    setIsExpenseModalOpen(true);
+  };
+
+  const handleSaveExpense = async (expensePayload) => {
+    if (editingExpense) {
+      await updateExpense(editingExpense.id, expensePayload);
+      showSuccess(`Expense record for "${expensePayload.category}" updated successfully.`);
+    } else {
+      const created = await createExpense(expensePayload);
+      showSuccess(`Expense of ${formatINR(created.amount)} (${created.category}) recorded successfully.`);
+    }
+  };
+
+  const handleConfirmDeleteExpense = async () => {
+    if (!deletingExpense) return;
+    try {
+      await deleteExpense(deletingExpense.id);
+      showSuccess(`Expense of ${formatINR(deletingExpense.amount)} deleted.`);
+    } catch (err) {
+      showError(err.message || 'Failed to delete expense.');
+    } finally {
+      setDeletingExpense(null);
+    }
+  };
+
+  // Income action handlers
+  const handleOpenAddIncome = () => {
+    setIsIncomeModalOpen(true);
+  };
+
+  const handleSaveIncome = async (incomePayload) => {
+    try {
+      const created = await createPayment(incomePayload);
+      showSuccess(`Income of ${formatINR(created.amount)} (${created.category}) recorded successfully.`);
+    } catch (err) {
+      showError(err.message || 'Failed to record income receipt.');
+      throw err;
+    }
+  };
+
+  const handleConfirmVoidIncome = async (reason) => {
+    if (!voidingPayment) return;
+    try {
+      await voidPayment(voidingPayment.id, reason);
+      showSuccess(`Payment receipt of ${formatINR(voidingPayment.amount)} voided.`);
+    } catch (err) {
+      showError(err.message || 'Failed to void payment.');
+    } finally {
+      setVoidingPayment(null);
+    }
+  };
 
   return (
     <div className="accounts-dashboard animate-fade-in">
+      {/* Toast: Success */}
+      {successToast && (
+        <div className="enquiry-toast animate-fade-in">
+          <CheckCircle2 size={18} className="toast-icon" />
+          <span>{successToast}</span>
+        </div>
+      )}
+
+      {/* Toast: Error */}
+      {errorToast && (
+        <div className="enquiry-toast enquiry-toast-error animate-fade-in">
+          <span className="toast-icon" style={{ color: '#fb7185' }}>⚠</span>
+          <span>{errorToast}</span>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="accounts-welcome-card">
         <div className="welcome-content">
@@ -162,12 +477,31 @@ export default function AccountsDashboardView() {
           </div>
           <h2 className="welcome-title">Financial Performance & Ledger</h2>
           <p className="welcome-desc">
-            Real-time tracking of venue income, operational expenses, profit margins, and customer receivables.
+            Real-time tracking of venue income, vendor commissions, operational expenses, profit margins, and customer receivables.
           </p>
         </div>
-        <div className="welcome-sync-badge">
-          <div className="sync-dot"></div>
-          <span>Live Firestore Sync</span>
+        <div className="accounts-welcome-actions">
+          <div className="welcome-sync-badge">
+            <div className="sync-dot"></div>
+            <span>Live Firestore Sync</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handleOpenAddIncome}
+            style={{ borderColor: 'rgba(16, 185, 129, 0.3)', color: '#34d399' }}
+          >
+            <Plus size={15} />
+            <span>Add Income</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={handleOpenAddExpense}
+          >
+            <Plus size={15} />
+            <span>Add Expense</span>
+          </button>
         </div>
       </div>
 
@@ -191,6 +525,8 @@ export default function AccountsDashboardView() {
             icon={Wallet}
             title="No Financial Records Found"
             message="No payments, bookings, or operational expenses have been recorded in the database yet. When bookings and receipts are added, financial summaries will automatically populate here."
+            actionText="Record First Expense"
+            onAction={handleOpenAddExpense}
           />
         </div>
       ) : (
@@ -213,7 +549,7 @@ export default function AccountsDashboardView() {
                 </div>
               </div>
               <div className="kpi-footer">
-                <span>Source of truth from payments</span>
+                <span>Bookings & vendor commissions</span>
               </div>
             </div>
 
@@ -320,16 +656,16 @@ export default function AccountsDashboardView() {
             </div>
           </div>
 
-          {/* Breakdowns Section (2 Columns) */}
+          {/* Breakdowns Section (2 Columns: Income by Category & Expenses by Category) */}
           <div className="accounts-breakdowns-grid">
-            {/* Income by Payment Method */}
+            {/* 1. Income by Category */}
             <div className="card breakdown-card">
               <div className="breakdown-header">
                 <div className="breakdown-title-wrap">
-                  <CreditCard size={19} className="breakdown-icon" />
+                  <CreditCard size={19} className="breakdown-icon" style={{ color: '#34d399' }} />
                   <div>
-                    <h3 className="breakdown-title">Income by Payment Method</h3>
-                    <p className="breakdown-subtitle">Distribution of receipts across payment channels</p>
+                    <h3 className="breakdown-title">Income by Category</h3>
+                    <p className="breakdown-subtitle">Distribution of venue revenues across sources</p>
                   </div>
                 </div>
                 <span className="badge badge-confirmed">
@@ -338,16 +674,18 @@ export default function AccountsDashboardView() {
               </div>
 
               <div className="breakdown-list">
-                {PAYMENT_METHODS.map((method) => {
-                  const amount = summary.paymentMethodBreakdown[method] || 0;
+                {INCOME_CATEGORIES.map((cat) => {
+                  const amount = summary.incomeCategoryBreakdown?.[cat] || 0;
                   const percentage = summary.totalIncome > 0 
                     ? Math.round((amount / summary.totalIncome) * 100) 
                     : 0;
 
+                  const slug = cat.toLowerCase().replace(/\s+/g, '-');
+
                   return (
-                    <div key={method} className="breakdown-row">
+                    <div key={cat} className="breakdown-row">
                       <div className="row-info">
-                        <span className="row-name">{method}</span>
+                        <span className="row-name">{cat}</span>
                         <div className="row-amount-wrap">
                           <span className="row-amount">{formatINR(amount)}</span>
                           <span className="row-percentage">({percentage}%)</span>
@@ -355,7 +693,7 @@ export default function AccountsDashboardView() {
                       </div>
                       <div className="progress-track">
                         <div 
-                          className={`progress-fill progress-method-${method.toLowerCase().replace(/\s+/g, '-')}`}
+                          className={`progress-fill progress-income-${slug}`}
                           style={{ width: `${percentage}%` }}
                         />
                       </div>
@@ -365,11 +703,11 @@ export default function AccountsDashboardView() {
               </div>
             </div>
 
-            {/* Expenses by Category */}
+            {/* 2. Expenses by Category */}
             <div className="card breakdown-card">
               <div className="breakdown-header">
                 <div className="breakdown-title-wrap">
-                  <PieChart size={19} className="breakdown-icon" />
+                  <PieChart size={19} className="breakdown-icon" style={{ color: '#f87171' }} />
                   <div>
                     <h3 className="breakdown-title">Expenses by Category</h3>
                     <p className="breakdown-subtitle">Breakdown of operational disbursements</p>
@@ -474,7 +812,456 @@ export default function AccountsDashboardView() {
               </div>
             )}
           </div>
+
+          {/* Ledger Section with Tabs (Expenses vs Income Receipts) */}
+          <div className="card expense-ledger-card">
+            <div className="expense-ledger-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '6px', background: 'var(--bg-surface-elevated)', padding: '3px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveLedgerTab('expenses')}
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '12.5px',
+                      fontWeight: 600,
+                      borderRadius: 'var(--radius-sm)',
+                      background: activeLedgerTab === 'expenses' ? 'var(--brand-gold)' : 'transparent',
+                      color: activeLedgerTab === 'expenses' ? '#fff' : 'var(--text-secondary)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    Operational Expenses ({expenses.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveLedgerTab('income')}
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '12.5px',
+                      fontWeight: 600,
+                      borderRadius: 'var(--radius-sm)',
+                      background: activeLedgerTab === 'income' ? 'var(--brand-gold)' : 'transparent',
+                      color: activeLedgerTab === 'income' ? '#fff' : 'var(--text-secondary)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    Income Receipts & Commissions ({payments.length})
+                  </button>
+                </div>
+              </div>
+
+              {/* Tab 1: Expense Controls */}
+              {activeLedgerTab === 'expenses' && (
+                <div className="expense-filter-controls">
+                  <select
+                    className="expense-category-select"
+                    value={expenseCategoryFilter}
+                    onChange={(e) => setExpenseCategoryFilter(e.target.value)}
+                  >
+                    <option value="all">All Categories ({expenses.length})</option>
+                    {EXPENSE_CATEGORIES.map((cat) => {
+                      const count = expenses.filter((e) => (e.category || '').toLowerCase() === cat.toLowerCase()).length;
+                      return (
+                        <option key={cat} value={cat}>
+                          {cat} ({count})
+                        </option>
+                      );
+                    })}
+                  </select>
+
+                  <div className="expense-search-input">
+                    <Search size={14} style={{ color: 'var(--text-disabled)' }} />
+                    <input
+                      type="text"
+                      placeholder="Search payee, notes..."
+                      value={expenseSearchQuery}
+                      onChange={(e) => setExpenseSearchQuery(e.target.value)}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleOpenAddExpense}
+                  >
+                    <Plus size={14} />
+                    <span>Add Expense</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Tab 2: Income Controls */}
+              {activeLedgerTab === 'income' && (
+                <div className="expense-filter-controls">
+                  <select
+                    className="expense-category-select"
+                    value={incomeCategoryFilter}
+                    onChange={(e) => setIncomeCategoryFilter(e.target.value)}
+                  >
+                    <option value="all">All Income Categories ({payments.length})</option>
+                    {INCOME_CATEGORIES.map((cat) => {
+                      const count = payments.filter((p) => {
+                        const c = p.category || (p.bookingId ? 'Hall Booking' : 'Other Income');
+                        return c.toLowerCase() === cat.toLowerCase();
+                      }).length;
+                      return (
+                        <option key={cat} value={cat}>
+                          {cat} ({count})
+                        </option>
+                      );
+                    })}
+                  </select>
+
+                  <div className="expense-search-input">
+                    <Search size={14} style={{ color: 'var(--text-disabled)' }} />
+                    <input
+                      type="text"
+                      placeholder="Search payer, ref, notes..."
+                      value={incomeSearchQuery}
+                      onChange={(e) => setIncomeSearchQuery(e.target.value)}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleOpenAddIncome}
+                  >
+                    <Plus size={14} />
+                    <span>Add Income</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* TAB CONTENT 1: EXPENSES TABLE */}
+            {activeLedgerTab === 'expenses' && (
+              <>
+                {filteredExpenses.length === 0 ? (
+                  <div className="trend-empty-note">
+                    {expenseSearchQuery || expenseCategoryFilter !== 'all' ? (
+                      <span>No expense records match your current filter.</span>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '16px 0' }}>
+                        <span>No operational expense records found in Firestore.</span>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={handleOpenAddExpense}
+                        >
+                          <Plus size={14} />
+                          <span>Record First Expense</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="trend-table-wrapper">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Date & Ref</th>
+                          <th>Category</th>
+                          <th>Payee & Description</th>
+                          <th>Payment Method</th>
+                          <th>Amount</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredExpenses.map((exp) => (
+                          <tr key={exp.id} className="animate-fade-in">
+                            <td>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <strong style={{ color: 'var(--text-primary)', fontSize: '13px' }}>
+                                  {formatDateDisplay(exp.expenseDate)}
+                                </strong>
+                                <span style={{ fontSize: '10.5px', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
+                                  #{exp.id.slice(0, 8).toUpperCase()}
+                                </span>
+                              </div>
+                            </td>
+
+                            <td>
+                              <span className="expense-category-badge">
+                                <Tag size={10} />
+                                <span>{exp.category || 'Other'}</span>
+                              </span>
+                            </td>
+
+                            <td>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '280px' }}>
+                                {exp.payee && (
+                                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <User size={12} style={{ color: 'var(--text-muted)' }} />
+                                    <span>{exp.payee}</span>
+                                  </div>
+                                )}
+                                {exp.description && (
+                                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                    {exp.description}
+                                  </div>
+                                )}
+                                {exp.notes && (
+                                  <div style={{ fontSize: '11px', color: 'var(--text-disabled)', fontStyle: 'italic' }}>
+                                    {exp.notes}
+                                  </div>
+                                )}
+                                {!exp.payee && !exp.description && !exp.notes && (
+                                  <span style={{ color: 'var(--text-disabled)' }}>—</span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span className="expense-method-tag">
+                                  <CreditCard size={11} />
+                                  <span>{exp.paymentMethod || 'Cash'}</span>
+                                </span>
+                                {exp.transactionReference && (
+                                  <span style={{ fontSize: '10.5px', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
+                                    Ref: {exp.transactionReference}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td>
+                              <div className="expense-amount-cell">
+                                {formatINR(exp.amount)}
+                              </div>
+                            </td>
+
+                            <td>
+                              <div className="expense-table-actions">
+                                <button
+                                  type="button"
+                                  className="table-action-icon-btn edit-btn"
+                                  onClick={() => handleOpenEditExpense(exp)}
+                                  title="Edit expense"
+                                  aria-label={`Edit expense #${exp.id.slice(0, 8)}`}
+                                >
+                                  <Edit2 size={15} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="table-action-icon-btn delete-btn"
+                                  onClick={() => setDeletingExpense(exp)}
+                                  title="Delete expense"
+                                  aria-label={`Delete expense #${exp.id.slice(0, 8)}`}
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* TAB CONTENT 2: INCOME RECEIPTS TABLE */}
+            {activeLedgerTab === 'income' && (
+              <>
+                {filteredIncomePayments.length === 0 ? (
+                  <div className="trend-empty-note">
+                    {incomeSearchQuery || incomeCategoryFilter !== 'all' ? (
+                      <span>No income receipts match your current filter.</span>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '16px 0' }}>
+                        <span>No income receipts recorded yet.</span>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={handleOpenAddIncome}
+                        >
+                          <Plus size={14} />
+                          <span>Record First Income</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="trend-table-wrapper">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Date & Ref</th>
+                          <th>Income Category</th>
+                          <th>Payer / Source</th>
+                          <th>Payment Method</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredIncomePayments.map((payment) => {
+                          const isVoided = payment.status === 'Voided';
+                          const cat = payment.category || (payment.bookingId ? 'Hall Booking' : 'Other Income');
+
+                          return (
+                            <tr key={payment.id} className={`animate-fade-in${isVoided ? ' voided-row' : ''}`} style={isVoided ? { opacity: 0.6 } : {}}>
+                              {/* Date & Ref */}
+                              <td>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <strong style={{ color: 'var(--text-primary)', fontSize: '13px' }}>
+                                    {formatDateDisplay(payment.paymentDate)}
+                                  </strong>
+                                  <span style={{ fontSize: '10.5px', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
+                                    #{payment.id.slice(0, 8).toUpperCase()}
+                                    {payment.bookingId && ` · Book #${payment.bookingId.slice(0, 6)}`}
+                                  </span>
+                                </div>
+                              </td>
+
+                              {/* Category */}
+                              <td>
+                                <span className={`badge ${
+                                  cat === 'Hall Booking'
+                                    ? 'badge-gold'
+                                    : cat === 'Decoration Commission'
+                                    ? 'badge-pending'
+                                    : cat === 'Catering Commission'
+                                    ? 'badge-new'
+                                    : 'badge-confirmed'
+                                }`}>
+                                  {cat}
+                                </span>
+                              </td>
+
+                              {/* Payer / Description */}
+                              <td>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '280px' }}>
+                                  {payment.customerName && (
+                                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <User size={12} style={{ color: 'var(--text-muted)' }} />
+                                      <span>{payment.customerName}</span>
+                                    </div>
+                                  )}
+                                  {payment.description && (
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                      {payment.description}
+                                    </div>
+                                  )}
+                                  {payment.notes && (
+                                    <div style={{ fontSize: '11px', color: 'var(--text-disabled)', fontStyle: 'italic' }}>
+                                      {payment.notes}
+                                    </div>
+                                  )}
+                                  {isVoided && payment.voidReason && (
+                                    <div style={{ fontSize: '11px', color: '#fb7185', marginTop: '2px' }}>
+                                      Void reason: {payment.voidReason}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Payment Method */}
+                              <td>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <span className="expense-method-tag">
+                                    <CreditCard size={11} />
+                                    <span>{payment.paymentMethod || 'Cash'}</span>
+                                  </span>
+                                  {payment.transactionReference && (
+                                    <span style={{ fontSize: '10.5px', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
+                                      Ref: {payment.transactionReference}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Amount */}
+                              <td>
+                                <div style={{
+                                  color: isVoided ? 'var(--text-disabled)' : '#34d399',
+                                  fontWeight: 700,
+                                  fontFamily: 'var(--font-mono)',
+                                  fontSize: '13.5px',
+                                  textDecoration: isVoided ? 'line-through' : 'none'
+                                }}>
+                                  {formatINR(payment.amount)}
+                                </div>
+                              </td>
+
+                              {/* Status */}
+                              <td>
+                                <span className={`badge ${isVoided ? 'badge-cancelled' : 'badge-confirmed'}`}>
+                                  {payment.status || 'Completed'}
+                                </span>
+                              </td>
+
+                              {/* Actions */}
+                              <td>
+                                {!isVoided && (
+                                  <button
+                                    type="button"
+                                    className="table-action-icon-btn delete-btn"
+                                    onClick={() => setVoidingPayment(payment)}
+                                    title="Void income receipt"
+                                    aria-label={`Void payment #${payment.id.slice(0, 8)}`}
+                                  >
+                                    <Ban size={15} />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </>
+      )}
+
+      {/* Expense Modal (Add / Edit) */}
+      <ExpenseModal
+        isOpen={isExpenseModalOpen}
+        onClose={() => {
+          setIsExpenseModalOpen(false);
+          setEditingExpense(null);
+        }}
+        onSave={handleSaveExpense}
+        existingExpense={editingExpense}
+      />
+
+      {/* Income Modal (Non-Booking Income) */}
+      <IncomeModal
+        isOpen={isIncomeModalOpen}
+        onClose={() => setIsIncomeModalOpen(false)}
+        onSave={handleSaveIncome}
+      />
+
+      {/* Delete Expense Dialog */}
+      {deletingExpense && (
+        <DeleteExpenseDialog
+          expense={deletingExpense}
+          onConfirm={handleConfirmDeleteExpense}
+          onCancel={() => setDeletingExpense(null)}
+        />
+      )}
+
+      {/* Void Income Dialog */}
+      {voidingPayment && (
+        <VoidIncomeDialog
+          payment={voidingPayment}
+          onConfirm={handleConfirmVoidIncome}
+          onCancel={() => setVoidingPayment(null)}
+        />
       )}
     </div>
   );

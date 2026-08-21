@@ -15,13 +15,17 @@ import {
   AlertCircle,
   ChevronDown,
   Sparkles,
-  IndianRupee
+  IndianRupee,
+  CreditCard
 } from 'lucide-react';
 import { useBookings } from '../../context/BookingsContext';
+import { createPayment } from '../../services/paymentsService';
 import BookingModal from './BookingModal';
+import BookingDetailDrawer from './BookingDetailDrawer';
 import EmptyState from '../Common/EmptyState';
 import './Views.css';
 import './BookingModal.css';
+import './PaymentPanel.css';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -178,6 +182,9 @@ export default function BookingsView() {
   // Delete confirm state
   const [deletingBooking, setDeletingBooking] = useState(null);
 
+  // Drawer state (booking detail + payment history panel)
+  const [drawerBookingId, setDrawerBookingId] = useState(null);
+
   // Toast state
   const [successToast, setSuccessToast] = useState('');
   const [errorToast, setErrorToast] = useState('');
@@ -192,6 +199,21 @@ export default function BookingsView() {
   const showError = (msg) => {
     setErrorToast(msg);
     setTimeout(() => setErrorToast(''), 5000);
+  };
+
+  // ── Payment collection ───────────────────────────────────────────────────────
+
+  const handleCollectPayment = async (paymentData) => {
+    try {
+      const result = await createPayment(paymentData);
+      showSuccess(
+        `Payment of ₹${Number(paymentData.amount).toLocaleString('en-IN')} via ${paymentData.paymentMethod} recorded successfully.`
+      );
+      return result;
+    } catch (err) {
+      showError(err.message || 'Failed to record payment.');
+      throw err; // Re-throw so PaymentModal shows the error
+    }
   };
 
   // ── Filtering ────────────────────────────────────────────────────────────────
@@ -489,6 +511,15 @@ export default function BookingsView() {
                       <div className="table-row-actions">
                         <button
                           type="button"
+                          className="table-action-icon-btn status-btn"
+                          onClick={() => setDrawerBookingId(booking.id)}
+                          title="View payments & collect payment"
+                          aria-label={`Payments for ${booking.customerName}`}
+                        >
+                          <CreditCard size={15} />
+                        </button>
+                        <button
+                          type="button"
                           className="table-action-icon-btn edit-btn"
                           onClick={() => handleOpenEdit(booking)}
                           title="Edit booking"
@@ -531,6 +562,22 @@ export default function BookingsView() {
           onCancel={() => setDeletingBooking(null)}
         />
       )}
+
+      {/* Booking Detail Drawer (payment summary + history + collect payment) */}
+      {drawerBookingId && (() => {
+        // Look up live booking from context so financial totals stay real-time
+        const drawerBooking = bookings.find((b) => b.id === drawerBookingId) || null;
+        if (!drawerBooking) return null;
+        return (
+          <BookingDetailDrawer
+            booking={drawerBooking}
+            onClose={() => setDrawerBookingId(null)}
+            onCollectPayment={handleCollectPayment}
+            showSuccess={showSuccess}
+            showError={showError}
+          />
+        );
+      })()}
     </div>
   );
 }

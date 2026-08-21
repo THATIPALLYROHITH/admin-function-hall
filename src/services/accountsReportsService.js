@@ -3,6 +3,19 @@
  * Aggregates valid (non-voided) payments, expenses, and bookings into financial summaries
  */
 
+export const INCOME_CATEGORIES = [
+  'Hall Booking',
+  'Decoration Commission',
+  'Catering Commission',
+  'Other Income'
+];
+
+export const NON_BOOKING_INCOME_CATEGORIES = [
+  'Decoration Commission',
+  'Catering Commission',
+  'Other Income'
+];
+
 export function calculateFinancialSummary(payments = [], expenses = [], bookings = [], dateRange = null) {
   // Optional date filtering helper
   const filterByDate = (item, dateField) => {
@@ -33,14 +46,22 @@ export function calculateFinancialSummary(payments = [], expenses = [], bookings
   const totalReceivedOnBookings = activeBookings.reduce((sum, b) => sum + (Number(b.totalPaid) || 0), 0);
   const totalOutstandingReceivables = activeBookings.reduce((sum, b) => sum + (Number(b.balanceAmount) || 0), 0);
 
-  // 3. Payment Method Breakdown (Valid payments only)
+  // 3. Income Category Breakdown (Valid payments only)
+  // Backward-compatible classification: existing or new booking payments map to 'Hall Booking'
+  const incomeCategoryBreakdown = filteredPayments.reduce((acc, p) => {
+    const cat = p.category || (p.bookingId ? 'Hall Booking' : 'Other Income');
+    acc[cat] = (acc[cat] || 0) + (Number(p.amount) || 0);
+    return acc;
+  }, {});
+
+  // 4. Payment Method Breakdown (Valid payments only)
   const paymentMethodBreakdown = filteredPayments.reduce((acc, p) => {
     const method = p.paymentMethod || 'Other';
     acc[method] = (acc[method] || 0) + (Number(p.amount) || 0);
     return acc;
   }, {});
 
-  // 4. Expense Category Breakdown
+  // 5. Expense Category Breakdown
   const expenseCategoryBreakdown = filteredExpenses.reduce((acc, e) => {
     const cat = e.category || 'Other';
     acc[cat] = (acc[cat] || 0) + (Number(e.amount) || 0);
@@ -77,6 +98,7 @@ export function calculateFinancialSummary(payments = [], expenses = [], bookings
     totalContractedAmount,
     totalReceivedOnBookings,
     totalOutstandingReceivables,
+    incomeCategoryBreakdown,
     paymentMethodBreakdown,
     expenseCategoryBreakdown,
     monthlyTrend: Object.values(monthlyTrend).sort((a, b) => a.month.localeCompare(b.month)),

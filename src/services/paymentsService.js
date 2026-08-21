@@ -15,6 +15,19 @@ import { derivePaymentStatus } from './bookingsService';
 const PAYMENTS_COLLECTION = 'payments';
 const BOOKINGS_COLLECTION = 'bookings';
 
+export const INCOME_CATEGORIES = [
+  'Hall Booking',
+  'Decoration Commission',
+  'Catering Commission',
+  'Other Income'
+];
+
+export const NON_BOOKING_INCOME_CATEGORIES = [
+  'Decoration Commission',
+  'Catering Commission',
+  'Other Income'
+];
+
 function ensureFirestore() {
   if (!isFirebaseConfigured || !db) {
     throw new Error('Firestore is not configured. Payment operations require an active database connection.');
@@ -34,13 +47,17 @@ export async function createPayment(paymentData) {
   }
 
   const bookingId = paymentData.bookingId || null;
+  const category = paymentData.category || (bookingId ? 'Hall Booking' : 'Other Income');
+
   const paymentPayload = {
     bookingId,
+    category,
     customerName: paymentData.customerName?.trim() || '',
     amount,
     paymentDate: paymentData.paymentDate || new Date().toISOString().slice(0, 10),
     paymentMethod: paymentData.paymentMethod || 'UPI',
     transactionReference: paymentData.transactionReference ? paymentData.transactionReference.trim() : '',
+    description: paymentData.description ? paymentData.description.trim() : '',
     notes: paymentData.notes ? paymentData.notes.trim() : '',
     status: 'Completed', // 'Completed' | 'Voided'
     recordedBy: paymentData.recordedBy || 'admin',
@@ -64,13 +81,21 @@ export async function createPayment(paymentData) {
           const newBalance = Math.max(0, totalAmount - newPaid);
           const newPaymentStatus = derivePaymentStatus(totalAmount, newPaid);
 
-          transaction.update(bookingRef, {
+          const bookingUpdate = {
             totalPaid: newPaid,
             balanceAmount: newBalance,
             paymentStatus: newPaymentStatus,
             updatedAt: new Date().toISOString(),
             serverUpdatedAt: serverTimestamp()
-          });
+          };
+
+          // When balance reaches zero, automatically mark booking as Completed
+          // (skip if already Cancelled — cancellations are not overridden by payments)
+          if (newBalance === 0 && bData.bookingStatus !== 'Cancelled') {
+            bookingUpdate.bookingStatus = 'Completed';
+          }
+
+          transaction.update(bookingRef, bookingUpdate);
         }
       }
 
@@ -133,13 +158,22 @@ export async function voidPayment(paymentId, voidReason = 'Cancelled by administ
           const newBalance = Math.max(0, totalAmount - newPaid);
           const newPaymentStatus = derivePaymentStatus(totalAmount, newPaid);
 
-          transaction.update(bookingRef, {
+          const bookingUpdate = {
             totalPaid: newPaid,
             balanceAmount: newBalance,
             paymentStatus: newPaymentStatus,
             updatedAt: new Date().toISOString(),
             serverUpdatedAt: serverTimestamp()
-          });
+          };
+
+          // If voiding this payment causes outstanding balance to reappear,
+          // and the booking was auto-Completed (balance was 0), revert to Confirmed.
+          // We only revert from 'Completed' — Tentative/Cancelled are left unchanged.
+          if (newBalance > 0 && bData.bookingStatus === 'Completed') {
+            bookingUpdate.bookingStatus = 'Confirmed';
+          }
+
+          transaction.update(bookingRef, bookingUpdate);
         }
       }
 
@@ -172,11 +206,12 @@ export function subscribePayments(onData, onError, optionalBookingId = null) {
   }
 
   try {
-    let q = optionalBookingId
+    // When filtering by bookingId, we query solely by 'bookingId' without orderBy in Firestore
+    // to avoid requiring a composite index. In-memory sorting ensures consistent descending order.
+    const q = optionalBookingId
       ? query(
           collection(db, PAYMENTS_COLLECTION),
-          where('bookingId', '==', optionalBookingId),
-          orderBy('paymentDate', 'desc')
+          where('bookingId', '==', optionalBookingId)
         )
       : query(collection(db, PAYMENTS_COLLECTION), orderBy('paymentDate', 'desc'));
 
@@ -192,6 +227,14 @@ export function subscribePayments(onData, onError, optionalBookingId = null) {
             updatedAt: data.updatedAt || (data.serverUpdatedAt ? data.serverUpdatedAt.toDate().toISOString() : new Date().toISOString())
           };
         });
+
+        // In-memory sort by paymentDate descending, then createdAt descending
+        items.sort((a, b) => {
+          const dateA = a.paymentDate || a.createdAt || '';
+          const dateB = b.paymentDate || b.createdAt || '';
+          return dateB.localeCompare(dateA);
+        });
+
         onData(items);
       },
       (error) => {
@@ -217,11 +260,16 @@ export async function getPaymentsByBookingId(bookingId) {
   try {
     const q = query(
       collection(db, PAYMENTS_COLLECTION),
-      where('bookingId', '==', bookingId),
-      orderBy('paymentDate', 'asc')
+      where('bookingId', '==', bookingId)
     );
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+    const items = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+    items.sort((a, b) => {
+      const dateA = a.paymentDate || a.createdAt || '';
+      const dateB = b.paymentDate || b.createdAt || '';
+      return dateA.localeCompare(dateB);
+    });
+    return items;
   } catch (err) {
     console.error('Firestore getPaymentsByBookingId error:', err);
     throw err;
