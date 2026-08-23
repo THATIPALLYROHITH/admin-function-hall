@@ -12,7 +12,7 @@ import {
   Hash,
   Sparkles
 } from 'lucide-react';
-import { EXPENSE_CATEGORIES } from '../../services/expensesService';
+import { EXPENSE_CATEGORIES, subscribeExpenses } from '../../services/expensesService';
 import '../Enquiries/EnquiryModal.css';
 
 const PAYMENT_METHODS = ['Cash', 'UPI', 'Bank Transfer', 'Other'];
@@ -30,6 +30,23 @@ export default function ExpenseModal({ isOpen, onClose, onSave, existingExpense 
   const [notes, setNotes] = useState('');
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [payeeSuggestions, setPayeeSuggestions] = useState([]);
+
+  // Load unique payees from recorded expenses for auto-suggestions
+  useEffect(() => {
+    const unsub = subscribeExpenses(
+      (data) => {
+        const unique = Array.from(
+          new Set(data.map((e) => (e.payee || '').trim()).filter(Boolean))
+        ).sort();
+        setPayeeSuggestions(unique);
+      },
+      (err) => console.error('Error fetching payee suggestions:', err)
+    );
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -249,10 +266,19 @@ export default function ExpenseModal({ isOpen, onClose, onSave, existingExpense 
                 <input
                   id="exp-payee"
                   type="text"
+                  list="exp-payee-suggestions"
                   placeholder="e.g. Sri Krishna Electricals / Staff Name"
                   value={payee}
                   onChange={(e) => setPayee(e.target.value)}
+                  autoComplete="off"
                 />
+                {payeeSuggestions.length > 0 && (
+                  <datalist id="exp-payee-suggestions">
+                    {payeeSuggestions.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
+                )}
               </div>
             </div>
 

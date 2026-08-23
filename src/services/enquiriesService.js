@@ -46,7 +46,7 @@ export async function createEnquiry(enquiryData) {
     timeSlot: enquiryData.timeSlot || 'Full Day',
     estimatedGuests: enquiryData.estimatedGuests ? Number(enquiryData.estimatedGuests) : null,
     notes: enquiryData.notes ? enquiryData.notes.trim() : '',
-    status: 'New',
+    status: enquiryData.status || 'New',
     createdAt: new Date().toISOString(),
     source: enquiryData.source || 'admin_manual'
   };
@@ -161,6 +161,42 @@ export async function modifyEnquiryStatus(id, newStatus) {
     const list = getLocalEnquiries();
     const updated = list.map((item) =>
       item.id === id ? { ...item, status: newStatus } : item
+    );
+    saveLocalEnquiries(updated);
+    return true;
+  }
+}
+
+/**
+ * Link an enquiry to a newly created booking document.
+ * Updates enquiry status to 'Converted' and stores bookingId & convertedAt.
+ */
+export async function linkEnquiryToBooking(enquiryId, bookingId) {
+  if (isFirebaseConfigured && db) {
+    try {
+      const docRef = doc(db, COLLECTION_NAME, enquiryId);
+      await updateDoc(docRef, {
+        status: 'Converted',
+        bookingId: bookingId,
+        convertedAt: new Date().toISOString(),
+        updatedAt: serverTimestamp()
+      });
+      return true;
+    } catch (err) {
+      console.error('Firestore linkEnquiryToBooking error:', err);
+      throw err;
+    }
+  } else {
+    const list = getLocalEnquiries();
+    const updated = list.map((item) =>
+      item.id === enquiryId
+        ? {
+            ...item,
+            status: 'Converted',
+            bookingId: bookingId,
+            convertedAt: new Date().toISOString()
+          }
+        : item
     );
     saveLocalEnquiries(updated);
     return true;

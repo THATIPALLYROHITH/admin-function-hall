@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { 
-  MessageSquareText, 
-  Search, 
-  Plus, 
-  Download, 
+import {
+  MessageSquareText,
+  Search,
+  Plus,
+  Download,
   Trash2,
   Calendar,
   Phone,
@@ -13,17 +13,34 @@ import {
   CheckCircle2,
   Clock,
   Eye,
-  FileText
+  FileText,
+  CalendarPlus,
+  Link2
 } from 'lucide-react';
 import { useEnquiries } from '../../context/EnquiriesContext';
+import { useBookings } from '../../context/BookingsContext';
 import EnquiryModal from './EnquiryModal';
+import BookingModal from '../Bookings/BookingModal';
 import EmptyState from '../Common/EmptyState';
 import './Views.css';
+
 export default function EnquiriesView() {
-  const { enquiries, addEnquiry, deleteEnquiry, updateEnquiryStatus, isLoading, error } = useEnquiries();
+  const {
+    enquiries,
+    addEnquiry,
+    deleteEnquiry,
+    updateEnquiryStatus,
+    linkEnquiryToBooking,
+    isLoading,
+    error
+  } = useEnquiries();
+
+  const { createBooking } = useBookings();
+
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [convertingEnquiry, setConvertingEnquiry] = useState(null);
   const [successToast, setSuccessToast] = useState('');
   const [errorToast, setErrorToast] = useState('');
   const [selectedNoteEnquiry, setSelectedNoteEnquiry] = useState(null);
@@ -44,6 +61,13 @@ export default function EnquiriesView() {
   };
 
   const handleStatusChange = async (id, newStatus) => {
+    const target = enquiries.find((e) => e.id === id);
+    if (target?.bookingId || (target?.status || '').toLowerCase() === 'converted') {
+      setErrorToast('Converted enquiries are locked and cannot have their status changed.');
+      setTimeout(() => setErrorToast(''), 4000);
+      return;
+    }
+
     try {
       await updateEnquiryStatus(id, newStatus);
       setSuccessToast(`Enquiry #${id} status updated to "${newStatus}".`);
@@ -58,11 +82,55 @@ export default function EnquiriesView() {
     }
   };
 
+  // Open conversion modal with pre-filled enquiry data
+  const handleOpenConvert = (enq) => {
+    if (enq.bookingId || (enq.status || '').toLowerCase() === 'converted') {
+      setSuccessToast(`Enquiry #${enq.id} is already linked to Booking #${(enq.bookingId || '').slice(0, 8).toUpperCase()}.`);
+      setTimeout(() => setSuccessToast(''), 4000);
+      return;
+    }
+    if ((enq.status || '').toLowerCase() === 'cancelled') {
+      setErrorToast('Cancelled enquiries cannot be converted into reservations.');
+      setTimeout(() => setErrorToast(''), 4500);
+      return;
+    }
+    setConvertingEnquiry(enq);
+  };
+
+  // Handle saving the new booking and linking the enquiry atomically
+  const handleSaveConvertedBooking = async (bookingData) => {
+    if (!convertingEnquiry) return;
+
+    // 1. Create the booking document via BookingsContext / bookingsService
+    const createdBooking = await createBooking(bookingData);
+
+    // 2. Link the enquiry to the created booking document
+    try {
+      await linkEnquiryToBooking(convertingEnquiry.id, createdBooking.id);
+    } catch (linkErr) {
+      console.error('Failed to link enquiry to booking:', linkErr);
+      setErrorToast(
+        `Booking #${createdBooking.id.slice(0, 8).toUpperCase()} was created, but linking Enquiry #${convertingEnquiry.id} failed: ${linkErr.message}`
+      );
+      setConvertingEnquiry(null);
+      return;
+    }
+
+    setSuccessToast(
+      `Enquiry #${convertingEnquiry.id} successfully converted to Booking #${createdBooking.id.slice(0, 8).toUpperCase()}!`
+    );
+    setTimeout(() => {
+      setSuccessToast('');
+    }, 4500);
+
+    setConvertingEnquiry(null);
+  };
+
   // Filter calculations
   const filteredEnquiries = enquiries.filter((item) => {
-    const matchesFilter = 
-      activeFilter === 'all' 
-        ? true 
+    const matchesFilter =
+      activeFilter === 'all'
+        ? true
         : (item.status || '').toLowerCase() === activeFilter.toLowerCase();
 
     if (!matchesFilter) return false;
@@ -86,9 +154,9 @@ export default function EnquiriesView() {
 
   const handleExportCSV = () => {
     if (enquiries.length === 0) return;
-    const headers = ['ID,Customer Name,Phone Number,Occasion,Target Date,Time Slot,Estimated Guests,Status,Created Date,Notes'];
-    const rows = enquiries.map((e) => 
-      `"${e.id}","${e.customerName}","${e.phoneNumber}","${e.occasion}","${e.targetDate}","${e.timeSlot}","${e.estimatedGuests || ''}","${e.status}","${new Date(e.createdAt).toLocaleDateString()}","${(e.notes || '').replace(/"/g, '""')}"`
+    const headers = ['ID,Customer Name,Phone Number,Occasion,Target Date,Time Slot,Estimated Guests,Status,Linked Booking ID,Created Date,Notes'];
+    const rows = enquiries.map((e) =>
+      `"${e.id}","${e.customerName}","${e.phoneNumber}","${e.occasion}","${e.targetDate}","${e.timeSlot}","${e.estimatedGuests || ''}","${e.status}","${e.bookingId || ''}","${new Date(e.createdAt).toLocaleDateString()}","${(e.notes || '').replace(/"/g, '""')}"`
     );
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -126,9 +194,9 @@ export default function EnquiriesView() {
         </div>
 
         <div className="view-header-actions">
-          <button 
-            type="button" 
-            className="btn btn-secondary btn-sm" 
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
             onClick={handleExportCSV}
             disabled={enquiries.length === 0}
             title={enquiries.length === 0 ? 'No enquiries to export' : 'Export enquiries to CSV'}
@@ -136,10 +204,10 @@ export default function EnquiriesView() {
             <Download size={15} />
             <span>Export CSV</span>
           </button>
-          
+
           {/* Manual Entry Button */}
-          <button 
-            type="button" 
+          <button
+            type="button"
             className="btn btn-primary btn-sm"
             onClick={() => setIsModalOpen(true)}
             id="manual-entry-btn"
@@ -202,105 +270,160 @@ export default function EnquiriesView() {
                 </tr>
               </thead>
               <tbody>
-                {filteredEnquiries.map((enq) => (
-                  <tr key={enq.id} className="animate-fade-in">
-                    <td>
-                      <div className="table-id-cell">
-                        <span className="enquiry-id-tag">{enq.id}</span>
-                        <span className="enquiry-date-sub">
-                          {new Date(enq.createdAt).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric'
-                          })}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="table-client-cell">
-                        <div className="client-name">{enq.customerName}</div>
-                        <div className="client-phone">
-                          <Phone size={12} />
-                          <span>{enq.phoneNumber}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="table-occasion-cell">
-                        <span className="occasion-title">{enq.occasion}</span>
-                        {enq.notes && (
-                          <button
-                            type="button"
-                            className="notes-preview-btn"
-                            onClick={() => setSelectedNoteEnquiry(enq)}
-                            title="View customer notes"
-                          >
-                            <FileText size={12} />
-                            <span>Notes</span>
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="table-target-date-cell">
-                        <div className="target-date-val">
-                          <Calendar size={13} />
-                          <span>
-                            {new Date(enq.targetDate).toLocaleDateString('en-US', {
-                              weekday: 'short',
+                {filteredEnquiries.map((enq) => {
+                  const isConverted = Boolean(enq.bookingId || (enq.status || '').toLowerCase() === 'converted');
+
+                  return (
+                    <tr key={enq.id} className="animate-fade-in">
+                      <td>
+                        <div className="table-id-cell">
+                          <span className="enquiry-id-tag">{enq.id}</span>
+                          <span className="enquiry-date-sub">
+                            {new Date(enq.createdAt).toLocaleDateString('en-US', {
                               month: 'short',
                               day: 'numeric',
                               year: 'numeric'
                             })}
                           </span>
                         </div>
-                        <div className="target-slot-sub">{enq.timeSlot}</div>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="table-guests-cell">
-                        {enq.estimatedGuests ? (
-                          <span className="guest-badge">
-                            <Users size={12} />
-                            {enq.estimatedGuests}
+                      </td>
+                      <td>
+                        <div className="table-client-cell">
+                          <div className="client-name">{enq.customerName}</div>
+                          <div className="client-phone">
+                            <Phone size={12} />
+                            <span>{enq.phoneNumber}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="table-occasion-cell">
+                          <span className="occasion-title">{enq.occasion}</span>
+                          {enq.notes && (
+                            <button
+                              type="button"
+                              className="notes-preview-btn"
+                              onClick={() => setSelectedNoteEnquiry(enq)}
+                              title="View customer notes"
+                            >
+                              <FileText size={12} />
+                              <span>Notes</span>
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="table-target-date-cell">
+                          <div className="target-date-val">
+                            <Calendar size={13} />
+                            <span>
+                              {new Date(enq.targetDate).toLocaleDateString('en-US', {
+                                weekday: 'short',
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                              })}
+                            </span>
+                          </div>
+                          <div className="target-slot-sub">{enq.timeSlot}</div>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="table-guests-cell">
+                          {enq.estimatedGuests ? (
+                            <span className="guest-badge">
+                              <Users size={12} />
+                              {enq.estimatedGuests}
+                            </span>
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        {isConverted ? (
+                          <span
+                            className="badge badge-gold"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              fontWeight: 700,
+                              padding: '4px 10px',
+                              fontSize: '11.5px',
+                              letterSpacing: '0.02em'
+                            }}
+                            title="Converted to official hall reservation"
+                          >
+                            <CheckCircle2 size={12} />
+                            <span>Converted</span>
                           </span>
                         ) : (
-                          <span className="text-muted">—</span>
+                          <div className="status-select-wrapper">
+                            <select
+                              className={`status-select-badge status-select-${(enq.status || 'new').toLowerCase()}`}
+                              value={enq.status || 'New'}
+                              onChange={(e) => handleStatusChange(enq.id, e.target.value)}
+                              title="Click to update enquiry status"
+                              aria-label={`Status for enquiry ${enq.id}`}
+                            >
+                              <option value="New">New</option>
+                              <option value="Contacted">Contacted</option>
+                              <option value="Quoted">Quoted</option>
+                              <option value="Converted">Converted</option>
+                              <option value="Cancelled">Cancelled</option>
+                            </select>
+                          </div>
                         )}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="status-select-wrapper">
-                        <select
-                          className={`status-select-badge status-select-${(enq.status || 'new').toLowerCase()}`}
-                          value={enq.status || 'New'}
-                          onChange={(e) => handleStatusChange(enq.id, e.target.value)}
-                          title="Click to update enquiry status"
-                          aria-label={`Status for enquiry ${enq.id}`}
-                        >
-                          <option value="New">New</option>
-                          <option value="Contacted">Contacted</option>
-                          <option value="Quoted">Quoted</option>
-                          <option value="Converted">Converted</option>
-                          <option value="Cancelled">Cancelled</option>
-                        </select>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="table-row-actions">
-                        <button
-                          type="button"
-                          className="table-action-icon-btn delete-btn"
-                          onClick={() => deleteEnquiry(enq.id)}
-                          title="Delete Enquiry"
-                          aria-label={`Delete enquiry ${enq.id}`}
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>
+                        <div className="table-row-actions">
+                          {/* Convert to Booking / Linked Booking state */}
+                          {isConverted ? (
+                            <span
+                              className="badge badge-confirmed"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '11px',
+                                padding: '3px 8px'
+                              }}
+                              title={enq.bookingId ? `Linked to Booking #${enq.bookingId}` : 'Reservation created'}
+                            >
+                              <Link2 size={11} />
+                              <span>{enq.bookingId ? `Booked #${enq.bookingId.slice(0, 6).toUpperCase()}` : 'Booked'}</span>
+                            </span>
+                          ) : (
+                            (enq.status || '').toLowerCase() !== 'cancelled' && (
+                              <button
+                                type="button"
+                                className="table-action-icon-btn edit-btn"
+                                onClick={() => handleOpenConvert(enq)}
+                                title="Convert to Reservation"
+                                aria-label={`Convert enquiry ${enq.id} to Reservation`}
+                                style={{ color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' }}
+                              >
+                                <CalendarPlus size={15} />
+                              </button>
+                            )
+                          )}
+
+                          {/* Delete Enquiry */}
+                          <button
+                            type="button"
+                            className="table-action-icon-btn delete-btn"
+                            onClick={() => deleteEnquiry(enq.id)}
+                            title="Delete Enquiry"
+                            aria-label={`Delete enquiry ${enq.id}`}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -308,8 +431,8 @@ export default function EnquiriesView() {
           <EmptyState
             icon={MessageSquareText}
             title={
-              searchQuery || activeFilter !== 'all' 
-                ? "No matching enquiries found" 
+              searchQuery || activeFilter !== 'all'
+                ? "No matching enquiries found"
                 : "No Inquiries Recorded Yet"
             }
             description={
@@ -331,6 +454,25 @@ export default function EnquiriesView() {
         onSave={handleSaveEnquiry}
       />
 
+      {/* Convert to Booking Modal */}
+      {convertingEnquiry && (
+        <BookingModal
+          isOpen={Boolean(convertingEnquiry)}
+          onClose={() => setConvertingEnquiry(null)}
+          onSave={handleSaveConvertedBooking}
+          initialData={{
+            customerName: convertingEnquiry.customerName,
+            phoneNumber: convertingEnquiry.phoneNumber,
+            occasion: convertingEnquiry.occasion,
+            eventDate: convertingEnquiry.targetDate,
+            timeSlot: convertingEnquiry.timeSlot,
+            estimatedGuests: convertingEnquiry.estimatedGuests,
+            notes: convertingEnquiry.notes,
+            enquiryId: convertingEnquiry.id
+          }}
+        />
+      )}
+
       {/* Notes Inspection Modal */}
       {selectedNoteEnquiry && (
         <div className="modal-overlay animate-fade-in" onClick={() => setSelectedNoteEnquiry(null)}>
@@ -346,8 +488,8 @@ export default function EnquiriesView() {
               <p className="notes-text-display">{selectedNoteEnquiry.notes}</p>
             </div>
             <div className="modal-actions-footer">
-              <button 
-                type="button" 
+              <button
+                type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => setSelectedNoteEnquiry(null)}
               >

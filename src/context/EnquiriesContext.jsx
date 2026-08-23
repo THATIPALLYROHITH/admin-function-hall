@@ -3,7 +3,8 @@ import {
   createEnquiry, 
   subscribeEnquiries, 
   removeEnquiry, 
-  modifyEnquiryStatus 
+  modifyEnquiryStatus,
+  linkEnquiryToBooking as svcLinkEnquiryToBooking
 } from '../services/enquiriesService';
 import { isFirebaseConfigured } from '../firebase/config';
 import { useAuth } from './AuthContext';
@@ -97,14 +98,37 @@ export function EnquiriesProvider({ children }) {
     }
   };
 
+  // Link enquiry to created booking
+  const linkEnquiryToBooking = async (enquiryId, bookingId) => {
+    try {
+      setError(null);
+      await svcLinkEnquiryToBooking(enquiryId, bookingId);
+      if (!isFirebaseConfigured) {
+        setEnquiries((prev) =>
+          prev.map((item) =>
+            item.id === enquiryId
+              ? { ...item, status: 'Converted', bookingId, convertedAt: new Date().toISOString() }
+              : item
+          )
+        );
+      }
+      return true;
+    } catch (err) {
+      setError(err.message || 'Failed to link enquiry to booking');
+      throw err;
+    }
+  };
+
   const value = {
     enquiries,
     isLoading,
     error,
     isFirebaseConfigured,
     addEnquiry,
+    createEnquiry: addEnquiry,
     deleteEnquiry,
-    updateEnquiryStatus
+    updateEnquiryStatus,
+    linkEnquiryToBooking
   };
 
   return (

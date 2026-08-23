@@ -13,10 +13,12 @@ import {
   CheckCircle2,
   Banknote,
   Receipt,
-  Sparkles
+  Sparkles,
+  Printer
 } from 'lucide-react';
 import { subscribePayments, voidPayment } from '../../services/paymentsService';
 import PaymentModal from './PaymentModal';
+import BookingReceiptModal from './BookingReceiptModal';
 import './PaymentPanel.css';
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
@@ -152,6 +154,7 @@ export default function BookingDetailDrawer({ booking, onClose, onCollectPayment
   const [paymentsLoading, setPaymentsLoading] = useState(true);
   const [voidingPayment, setVoidingPayment] = useState(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
 
   const balance = Number(booking?.balanceAmount) || 0;
   const hasOutstanding = balance > 0;
@@ -452,8 +455,8 @@ export default function BookingDetailDrawer({ booking, onClose, onCollectPayment
           )}
         </div>
 
-        {/* Footer: Edit button */}
-        <div className="booking-drawer-footer">
+        {/* Footer: Actions */}
+        <div className="booking-drawer-footer" style={{ gap: '8px', flexWrap: 'wrap' }}>
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -461,11 +464,21 @@ export default function BookingDetailDrawer({ booking, onClose, onCollectPayment
           >
             Close
           </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setIsReceiptModalOpen(true)}
+            style={{ gap: '5px' }}
+            title="Preview and print official booking confirmation voucher"
+          >
+            <Printer size={14} style={{ color: 'var(--brand-gold)' }} />
+            <span>Print Confirmation</span>
+          </button>
           {hasOutstanding && (
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              style={{ flex: 1, justifyContent: 'center' }}
+              style={{ flex: 1, minWidth: '160px', justifyContent: 'center' }}
               onClick={() => setIsPaymentModalOpen(true)}
             >
               <IndianRupee size={14} />
@@ -481,6 +494,14 @@ export default function BookingDetailDrawer({ booking, onClose, onCollectPayment
         onClose={() => setIsPaymentModalOpen(false)}
         onSave={handleSavePayment}
         booking={booking}
+      />
+
+      {/* Booking Receipt Printable Modal */}
+      <BookingReceiptModal
+        isOpen={isReceiptModalOpen}
+        onClose={() => setIsReceiptModalOpen(false)}
+        booking={booking}
+        payments={payments}
       />
 
       {/* Void Confirmation Dialog */}

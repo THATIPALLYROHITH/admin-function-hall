@@ -85,7 +85,7 @@ export default function Sidebar({
           <nav className="sidebar-nav">
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
-              const isActive = activeTab === item.id;
+              const isActive = activeTab === item.id || (item.id === 'accounts' && (activeTab === 'receivables' || activeTab === 'financial-reports'));
 
               return (
                 <button

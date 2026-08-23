@@ -14,9 +14,12 @@ import {
   Phone,
   IndianRupee,
   X,
-  Eye
+  Eye,
+  Plus,
+  CheckCircle2
 } from 'lucide-react';
 import { useBookings } from '../../context/BookingsContext';
+import BookingModal from '../Bookings/BookingModal';
 import './CalendarView.css';
 
 function formatINR(val) {
@@ -42,10 +45,41 @@ function getSlotLabel(timeSlot = '') {
   return 'Full Day';
 }
 
+function getAvailableSlotsForDay(dayBookings = []) {
+  const activeBookings = dayBookings.filter((b) => (b.bookingStatus || '').toLowerCase() !== 'cancelled');
+
+  if (activeBookings.length === 0) {
+    return [
+      { key: 'Full Day', label: 'Full Day (07:00 AM – 11:00 PM)', short: 'Full Day' },
+      { key: 'Morning Slot', label: 'Morning Slot (07:00 AM – 02:00 PM)', short: 'Morning Slot' },
+      { key: 'Evening Slot', label: 'Evening Slot (04:00 PM – 11:00 PM)', short: 'Evening Slot' }
+    ];
+  }
+
+  const hasFullDay = activeBookings.some((b) => getSlotType(b.timeSlot) === 'fullday');
+  if (hasFullDay) return [];
+
+  const hasMorning = activeBookings.some((b) => getSlotType(b.timeSlot) === 'morning');
+  const hasEvening = activeBookings.some((b) => getSlotType(b.timeSlot) === 'evening');
+
+  const available = [];
+  if (!hasMorning) {
+    available.push({ key: 'Morning Slot', label: 'Morning Slot (07:00 AM – 02:00 PM)', short: 'Morning Slot' });
+  }
+  if (!hasEvening) {
+    available.push({ key: 'Evening Slot', label: 'Evening Slot (04:00 PM – 11:00 PM)', short: 'Evening Slot' });
+  }
+
+  return available;
+}
+
 export default function CalendarView() {
-  const { bookings, isLoading } = useBookings();
+  const { bookings, isLoading, createBooking } = useBookings();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDayEvents, setSelectedDayEvents] = useState(null); // { date: 'YYYY-MM-DD', bookings: [] }
+  const [bookingModalInitialData, setBookingModalInitialData] = useState(null);
+  const [successToast, setSuccessToast] = useState('');
+  const [errorToast, setErrorToast] = useState('');
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -154,6 +188,22 @@ export default function CalendarView() {
 
   return (
     <div className="calendar-view-container animate-fade-in">
+      {/* Toast: Success */}
+      {successToast && (
+        <div className="enquiry-toast animate-fade-in">
+          <CheckCircle2 size={18} className="toast-icon" />
+          <span>{successToast}</span>
+        </div>
+      )}
+
+      {/* Toast: Error */}
+      {errorToast && (
+        <div className="enquiry-toast enquiry-toast-error animate-fade-in">
+          <span className="toast-icon" style={{ color: '#fb7185' }}>⚠</span>
+          <span>{errorToast}</span>
+        </div>
+      )}
+
       {/* Calendar Header */}
       <div className="view-header-bar">
         <div className="view-header-title-group">
@@ -243,10 +293,11 @@ export default function CalendarView() {
                 key={index}
                 className={`calendar-cell ${!cell.isCurrentMonth ? 'cell-inactive' : ''} ${cell.isToday ? 'cell-today' : ''} ${hasBookings ? 'cell-has-events' : ''}`}
                 onClick={() => {
-                  if (hasBookings) {
+                  if (cell.isCurrentMonth) {
                     setSelectedDayEvents({ date: cell.dateString, bookings: cell.dayBookings });
                   }
                 }}
+                title={cell.isCurrentMonth ? 'Click to inspect or book slots for this date' : undefined}
               >
                 <div className="cell-header">
                   <span className={`cell-day-number ${cell.isToday ? 'badge-today' : ''}`}>
@@ -309,117 +360,201 @@ export default function CalendarView() {
       <div className="calendar-footer-notice">
         <Info size={16} />
         <span>
-          Click on any reserved date to inspect full reservation details, guest estimates, slot allocation, and contract balance.
+          Click on any calendar date to inspect reservation details or quickly book available Morning, Evening, or Full Day slots.
         </span>
       </div>
 
       {/* Selected Day Event Details Modal */}
-      {selectedDayEvents && (
-        <div className="confirm-dialog-overlay animate-fade-in" onClick={() => setSelectedDayEvents(null)}>
-          <div
-            className="confirm-dialog-box calendar-day-modal"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: '560px' }}
-          >
-            <div className="calendar-day-modal-header">
-              <div>
-                <div className="modal-badge">
-                  <Calendar size={12} />
-                  <span>
-                    {new Date(selectedDayEvents.date + 'T00:00:00').toLocaleDateString('en-IN', {
-                      weekday: 'long',
-                      month: 'long',
-                      day: 'numeric',
-                      year: 'numeric'
-                    })}
-                  </span>
-                </div>
-                <h3 className="modal-title" style={{ fontSize: '18px', marginTop: '4px' }}>
-                  Day Reservations ({selectedDayEvents.bookings.length})
-                </h3>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                onClick={() => setSelectedDayEvents(null)}
-              >
-                <X size={18} />
-              </button>
-            </div>
+      {selectedDayEvents && (() => {
+        const availableSlots = getAvailableSlotsForDay(selectedDayEvents.bookings);
+        const hasBookings = selectedDayEvents.bookings.length > 0;
 
-            <div className="calendar-day-modal-body">
-              {selectedDayEvents.bookings.map((b) => {
-                const slotType = getSlotType(b.timeSlot);
-                return (
-                  <div key={b.id} className="calendar-booking-detail-card">
-                    <div className="detail-card-top">
-                      <div className="detail-card-slot">
-                        <span className={`legend-indicator slot-${slotType}`}></span>
-                        <strong>{getSlotLabel(b.timeSlot)}</strong>
+        return (
+          <div className="confirm-dialog-overlay animate-fade-in" onClick={() => setSelectedDayEvents(null)}>
+            <div
+              className="confirm-dialog-box calendar-day-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: '560px' }}
+            >
+              <div className="calendar-day-modal-header">
+                <div>
+                  <div className="modal-badge">
+                    <Calendar size={12} />
+                    <span>
+                      {new Date(selectedDayEvents.date + 'T00:00:00').toLocaleDateString('en-IN', {
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })}
+                    </span>
+                  </div>
+                  <h3 className="modal-title" style={{ fontSize: '18px', marginTop: '4px' }}>
+                    {hasBookings
+                      ? `Day Schedule & Reservations (${selectedDayEvents.bookings.length})`
+                      : 'Date Availability & Booking'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  className="modal-close-btn"
+                  onClick={() => setSelectedDayEvents(null)}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="calendar-day-modal-body">
+                {/* Active reservations on this date */}
+                {hasBookings ? (
+                  selectedDayEvents.bookings.map((b) => {
+                    const slotType = getSlotType(b.timeSlot);
+                    return (
+                      <div key={b.id} className="calendar-booking-detail-card">
+                        <div className="detail-card-top">
+                          <div className="detail-card-slot">
+                            <span className={`legend-indicator slot-${slotType}`}></span>
+                            <strong>{getSlotLabel(b.timeSlot)}</strong>
+                          </div>
+                          <span className={`badge ${
+                            (b.bookingStatus || '').toLowerCase() === 'confirmed'
+                              ? 'badge-confirmed'
+                              : (b.bookingStatus || '').toLowerCase() === 'completed'
+                              ? 'badge-gold'
+                              : 'badge-pending'
+                          }`}>
+                            {b.bookingStatus || 'Confirmed'}
+                          </span>
+                        </div>
+
+                        <div className="detail-card-client">
+                          <div className="detail-client-name">{b.customerName}</div>
+                          <div className="detail-client-meta">
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <Phone size={12} />
+                              {b.phoneNumber}
+                            </span>
+                            {b.estimatedGuests && (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Users size={12} />
+                                {b.estimatedGuests} guests
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="detail-card-occasion">
+                          <strong>Occasion:</strong> {b.occasion}
+                        </div>
+
+                        <div className="detail-card-financials">
+                          <div>
+                            <span>Contract: </span>
+                            <strong>{formatINR(b.totalAmount)}</strong>
+                          </div>
+                          <div>
+                            <span>Paid: </span>
+                            <strong style={{ color: '#34d399' }}>{formatINR(b.totalPaid)}</strong>
+                          </div>
+                          <div>
+                            <span>Due: </span>
+                            <strong style={{ color: Number(b.balanceAmount) > 0 ? '#fbbf24' : '#34d399' }}>
+                              {formatINR(b.balanceAmount)}
+                            </strong>
+                          </div>
+                        </div>
                       </div>
-                      <span className={`badge ${
-                        (b.bookingStatus || '').toLowerCase() === 'confirmed'
-                          ? 'badge-confirmed'
-                          : (b.bookingStatus || '').toLowerCase() === 'completed'
-                          ? 'badge-gold'
-                          : 'badge-pending'
-                      }`}>
-                        {b.bookingStatus || 'Confirmed'}
+                    );
+                  })
+                ) : (
+                  <div style={{
+                    padding: '16px 20px',
+                    background: 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    color: 'var(--text-secondary)',
+                    fontSize: '13px',
+                    lineHeight: '1.5'
+                  }}>
+                    No bookings scheduled on this date yet. Both Morning and Evening slots are fully available for reservation.
+                  </div>
+                )}
+
+                {/* Available Slot Booking Actions */}
+                {availableSlots.length > 0 ? (
+                  <div className="calendar-available-box animate-fade-in">
+                    <div className="calendar-available-header">
+                      <div className="calendar-available-title">
+                        <CheckCircle2 size={14} />
+                        <span>Available for Booking</span>
+                      </div>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {availableSlots.length} open option{availableSlots.length > 1 ? 's' : ''}
                       </span>
                     </div>
 
-                    <div className="detail-card-client">
-                      <div className="detail-client-name">{b.customerName}</div>
-                      <div className="detail-client-meta">
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <Phone size={12} />
-                          {b.phoneNumber}
-                        </span>
-                        {b.estimatedGuests && (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <Users size={12} />
-                            {b.estimatedGuests} guests
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="detail-card-occasion">
-                      <strong>Occasion:</strong> {b.occasion}
-                    </div>
-
-                    <div className="detail-card-financials">
-                      <div>
-                        <span>Contract: </span>
-                        <strong>{formatINR(b.totalAmount)}</strong>
-                      </div>
-                      <div>
-                        <span>Paid: </span>
-                        <strong style={{ color: '#34d399' }}>{formatINR(b.totalPaid)}</strong>
-                      </div>
-                      <div>
-                        <span>Due: </span>
-                        <strong style={{ color: Number(b.balanceAmount) > 0 ? '#fbbf24' : '#34d399' }}>
-                          {formatINR(b.balanceAmount)}
-                        </strong>
-                      </div>
+                    <div className="calendar-available-buttons">
+                      {availableSlots.map((slot) => (
+                        <button
+                          key={slot.key}
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => {
+                            setBookingModalInitialData({
+                              eventDate: selectedDayEvents.date,
+                              timeSlot: slot.label
+                            });
+                            setSelectedDayEvents(null);
+                          }}
+                          style={{ gap: '5px', fontSize: '12px' }}
+                          title={`Open booking form for ${slot.short} on ${selectedDayEvents.date}`}
+                        >
+                          <Plus size={13} />
+                          <span>Book {slot.short}</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                ) : (
+                  <div className="calendar-fully-booked-box animate-fade-in">
+                    This date is fully booked (no remaining open time slots).
+                  </div>
+                )}
+              </div>
 
-            <div className="modal-actions-footer" style={{ marginTop: '16px', paddingTop: '12px' }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setSelectedDayEvents(null)}
-              >
-                Close
-              </button>
+              <div className="modal-actions-footer" style={{ marginTop: '16px', paddingTop: '12px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setSelectedDayEvents(null)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        );
+      })()}
+
+      {/* Booking Modal (Triggered via "Book This Slot") */}
+      {bookingModalInitialData && (
+        <BookingModal
+          isOpen={Boolean(bookingModalInitialData)}
+          initialData={bookingModalInitialData}
+          onClose={() => setBookingModalInitialData(null)}
+          onSave={async (bookingData) => {
+            try {
+              const created = await createBooking(bookingData);
+              setSuccessToast(`Reservation for ${created.customerName} (${created.timeSlot}) confirmed.`);
+              setTimeout(() => setSuccessToast(''), 4500);
+              setBookingModalInitialData(null);
+            } catch (err) {
+              setErrorToast(err.message || 'Failed to create reservation.');
+              setTimeout(() => setErrorToast(''), 5000);
+              throw err;
+            }
+          }}
+        />
       )}
     </div>
   );

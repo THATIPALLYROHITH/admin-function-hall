@@ -1,21 +1,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Wallet, 
-  TrendingUp, 
-  TrendingDown, 
-  ArrowUpRight, 
-  ArrowDownRight, 
-  IndianRupee, 
-  Receipt, 
-  Calendar, 
-  CreditCard, 
-  Building2, 
-  Sparkles, 
-  Clock, 
-  PieChart, 
-  BarChart3, 
-  AlertCircle, 
-  RefreshCw, 
+import {
+  Wallet,
+  TrendingUp,
+  TrendingDown,
+  ArrowUpRight,
+  ArrowDownRight,
+  IndianRupee,
+  Receipt,
+  Calendar,
+  CreditCard,
+  Building2,
+  Sparkles,
+  Clock,
+  PieChart,
+  BarChart3,
+  AlertCircle,
+  RefreshCw,
   CheckCircle2,
   XCircle,
   HelpCircle,
@@ -27,7 +27,16 @@ import {
   Hash,
   User,
   FileText,
-  Ban
+  Ban,
+  Filter,
+  Eye,
+  Phone,
+  Users,
+  ChevronDown,
+  Download,
+  ListFilter,
+  Layers,
+  ArrowRight
 } from 'lucide-react';
 import {
   subscribePayments,
@@ -43,10 +52,17 @@ import {
   EXPENSE_CATEGORIES
 } from '../../services/expensesService';
 import { subscribeBookings } from '../../services/bookingsService';
-import { calculateFinancialSummary } from '../../services/accountsReportsService';
+import {
+  calculateFinancialSummary,
+  PAYMENT_METHODS,
+  buildUnifiedTransactions,
+  exportLedgerToCSV,
+  exportExpensesToCSV
+} from '../../services/accountsReportsService';
 import { useAuth } from '../../context/AuthContext';
 import ExpenseModal from './ExpenseModal';
 import IncomeModal from './IncomeModal';
+import BookingDetailDrawer from '../Bookings/BookingDetailDrawer';
 import EmptyState from '../Common/EmptyState';
 import './AccountsDashboardView.css';
 
@@ -200,20 +216,29 @@ function VoidIncomeDialog({ payment, onConfirm, onCancel }) {
   );
 }
 
-export default function AccountsDashboardView() {
+export default function AccountsDashboardView({ onNavigate }) {
   const { isAuthenticated, isAuthLoading } = useAuth();
-  
+
   const [payments, setPayments] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [bookings, setBookings] = useState([]);
-  
+
   const [isLoadingPayments, setIsLoadingPayments] = useState(true);
   const [isLoadingExpenses, setIsLoadingExpenses] = useState(true);
   const [isLoadingBookings, setIsLoadingBookings] = useState(true);
   const [error, setError] = useState(null);
 
-  // Active Ledger Tab ('expenses' | 'income')
-  const [activeLedgerTab, setActiveLedgerTab] = useState('expenses');
+  // Financial Period Filter state ('this_month' | 'today' | 'last_month' | 'all_time' | 'custom')
+  const [selectedPeriod, setSelectedPeriod] = useState('this_month');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [appliedCustomRange, setAppliedCustomRange] = useState({ startDate: '', endDate: '' });
+
+  // Phase 3C Unified Transaction Ledger Filter state
+  const [ledgerTypeFilter, setLedgerTypeFilter] = useState('all'); // 'all' | 'income' | 'expense'
+  const [ledgerCategoryFilter, setLedgerCategoryFilter] = useState('all');
+  const [ledgerMethodFilter, setLedgerMethodFilter] = useState('all');
+  const [ledgerSearch, setLedgerSearch] = useState('');
 
   // Modals & Dialogs state
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -221,12 +246,7 @@ export default function AccountsDashboardView() {
   const [editingExpense, setEditingExpense] = useState(null);
   const [deletingExpense, setDeletingExpense] = useState(null);
   const [voidingPayment, setVoidingPayment] = useState(null);
-
-  // Filters & Search
-  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('all');
-  const [incomeCategoryFilter, setIncomeCategoryFilter] = useState('all');
-  const [expenseSearchQuery, setExpenseSearchQuery] = useState('');
-  const [incomeSearchQuery, setIncomeSearchQuery] = useState('');
+  const [detailDrawerBooking, setDetailDrawerBooking] = useState(null);
 
   // Toasts
   const [successToast, setSuccessToast] = useState('');
@@ -305,12 +325,71 @@ export default function AccountsDashboardView() {
     };
   }, [isAuthenticated, isAuthLoading]);
 
-  // Overall Financial Summary Calculation using accountsReportsService
-  const summary = useMemo(() => {
-    return calculateFinancialSummary(payments, expenses, bookings);
-  }, [payments, expenses, bookings]);
+  // Compute active date range based on selected financial period
+  const activeDateRange = useMemo(() => {
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
 
-  // Current Month Calculations
+    if (selectedPeriod === 'today') {
+      return {
+        startDate: todayStr,
+        endDate: todayStr,
+        label: `Today (${now.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})`
+      };
+    }
+
+    if (selectedPeriod === 'this_month') {
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
+      return {
+        startDate: `${year}-${month}-01`,
+        endDate: `${year}-${month}-${String(lastDay).padStart(2, '0')}`,
+        label: `This Month (${now.toLocaleString('en-US', { month: 'long', year: 'numeric' })})`
+      };
+    }
+
+    if (selectedPeriod === 'last_month') {
+      const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const year = prevDate.getFullYear();
+      const month = String(prevDate.getMonth() + 1).padStart(2, '0');
+      const lastDay = new Date(year, prevDate.getMonth() + 1, 0).getDate();
+      return {
+        startDate: `${year}-${month}-01`,
+        endDate: `${year}-${month}-${String(lastDay).padStart(2, '0')}`,
+        label: `Last Month (${prevDate.toLocaleString('en-US', { month: 'long', year: 'numeric' })})`
+      };
+    }
+
+    if (selectedPeriod === 'custom') {
+      if (appliedCustomRange.startDate && appliedCustomRange.endDate) {
+        return {
+          startDate: appliedCustomRange.startDate,
+          endDate: appliedCustomRange.endDate,
+          label: `Custom (${formatDateDisplay(appliedCustomRange.startDate)} – ${formatDateDisplay(appliedCustomRange.endDate)})`
+        };
+      }
+      return {
+        startDate: appliedCustomRange.startDate || null,
+        endDate: appliedCustomRange.endDate || null,
+        label: 'Custom Range'
+      };
+    }
+
+    // Default / All Time
+    return {
+      startDate: null,
+      endDate: null,
+      label: 'All Recorded Time'
+    };
+  }, [selectedPeriod, appliedCustomRange]);
+
+  // Overall Financial Summary Calculation driven by active date range
+  const summary = useMemo(() => {
+    return calculateFinancialSummary(payments, expenses, bookings, activeDateRange);
+  }, [payments, expenses, bookings, activeDateRange]);
+
+  // Current Month Reference Calculations for baseline KPI cards
   const currentMonthData = useMemo(() => {
     const currentMonthKey = new Date().toISOString().slice(0, 7); // e.g. "2026-08"
     const monthPayments = payments.filter(
@@ -337,58 +416,146 @@ export default function AccountsDashboardView() {
     };
   }, [payments, expenses]);
 
-  // Filtered expenses list for ledger table
-  const filteredExpenses = useMemo(() => {
-    return expenses.filter((e) => {
-      if (expenseCategoryFilter !== 'all' && (e.category || '').toLowerCase() !== expenseCategoryFilter.toLowerCase()) {
+  // Receivables Summary Metrics
+  const receivablesMetrics = useMemo(() => {
+    const activeWithDue = bookings.filter((b) => {
+      const isCancelled = (b.bookingStatus || '').toLowerCase() === 'cancelled';
+      const balance = Number(b.balanceAmount) || 0;
+      return !isCancelled && balance > 0;
+    });
+
+    const totalOutstanding = activeWithDue.reduce((sum, b) => sum + (Number(b.balanceAmount) || 0), 0);
+    const totalCount = activeWithDue.length;
+
+    return {
+      totalOutstanding,
+      totalCount
+    };
+  }, [bookings]);
+
+  // Phase 3C Unified Transactions Master List
+  const rawUnifiedTransactions = useMemo(() => {
+    return buildUnifiedTransactions(payments, expenses);
+  }, [payments, expenses]);
+
+  // Phase 3C Filtered Unified Transactions (Respects active period, type, category, method, search)
+  const filteredLedgerTransactions = useMemo(() => {
+    return rawUnifiedTransactions.filter((t) => {
+      // 1. Filter by active financial period date range
+      if (activeDateRange.startDate && (t.date || '') < activeDateRange.startDate) return false;
+      if (activeDateRange.endDate && (t.date || '') > activeDateRange.endDate) return false;
+
+      // 2. Filter by Transaction Type (All, Income, Expense)
+      if (ledgerTypeFilter !== 'all' && t.transactionType !== ledgerTypeFilter) {
         return false;
       }
-      if (expenseSearchQuery.trim()) {
-        const q = expenseSearchQuery.toLowerCase();
-        return (
-          (e.id || '').toLowerCase().includes(q) ||
-          (e.category || '').toLowerCase().includes(q) ||
-          (e.payee || '').toLowerCase().includes(q) ||
-          (e.description || '').toLowerCase().includes(q) ||
-          (e.paymentMethod || '').toLowerCase().includes(q) ||
-          (e.transactionReference || '').toLowerCase().includes(q) ||
-          (e.notes || '').toLowerCase().includes(q) ||
-          (e.expenseDate || '').includes(q) ||
-          String(e.amount || '').includes(q)
-        );
-      }
-      return true;
-    });
-  }, [expenses, expenseCategoryFilter, expenseSearchQuery]);
 
-  // Filtered income payments list for ledger table
-  const filteredIncomePayments = useMemo(() => {
-    return payments.filter((p) => {
-      const category = p.category || (p.bookingId ? 'Hall Booking' : 'Other Income');
-
-      if (incomeCategoryFilter !== 'all' && category.toLowerCase() !== incomeCategoryFilter.toLowerCase()) {
+      // 3. Filter by Category
+      if (ledgerCategoryFilter !== 'all' && (t.category || '').toLowerCase() !== ledgerCategoryFilter.toLowerCase()) {
         return false;
       }
-      if (incomeSearchQuery.trim()) {
-        const q = incomeSearchQuery.toLowerCase();
+
+      // 4. Filter by Payment Method
+      if (ledgerMethodFilter !== 'all' && (t.paymentMethod || '').toLowerCase() !== ledgerMethodFilter.toLowerCase()) {
+        return false;
+      }
+
+      // 5. Filter by Search Query
+      if (ledgerSearch.trim()) {
+        const q = ledgerSearch.toLowerCase();
         return (
-          (p.id || '').toLowerCase().includes(q) ||
-          category.toLowerCase().includes(q) ||
-          (p.customerName || '').toLowerCase().includes(q) ||
-          (p.description || '').toLowerCase().includes(q) ||
-          (p.paymentMethod || '').toLowerCase().includes(q) ||
-          (p.transactionReference || '').toLowerCase().includes(q) ||
-          (p.notes || '').toLowerCase().includes(q) ||
-          (p.paymentDate || '').includes(q) ||
-          String(p.amount || '').includes(q)
+          (t.id || '').toLowerCase().includes(q) ||
+          (t.party || '').toLowerCase().includes(q) ||
+          (t.category || '').toLowerCase().includes(q) ||
+          (t.description || '').toLowerCase().includes(q) ||
+          (t.transactionReference || '').toLowerCase().includes(q) ||
+          (t.paymentMethod || '').toLowerCase().includes(q) ||
+          (t.bookingId || '').toLowerCase().includes(q) ||
+          (t.date || '').includes(q) ||
+          String(t.amount || '').includes(q)
         );
       }
+
       return true;
     });
-  }, [payments, incomeCategoryFilter, incomeSearchQuery]);
+  }, [rawUnifiedTransactions, activeDateRange, ledgerTypeFilter, ledgerCategoryFilter, ledgerMethodFilter, ledgerSearch]);
+
+  // Phase 3C Filtered Ledger Totals (Calculated strictly on filtered transactions)
+  const ledgerTotals = useMemo(() => {
+    const income = filteredLedgerTransactions
+      .filter((t) => t.transactionType === 'income' && !t.isVoided)
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+    const expense = filteredLedgerTransactions
+      .filter((t) => t.transactionType === 'expense')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+    const net = income - expense;
+    const count = filteredLedgerTransactions.length;
+
+    return { income, expense, net, count };
+  }, [filteredLedgerTransactions]);
+
+  // Category counts and totals for Income Report (Phase 3D)
+  const incomeCategoryReportData = useMemo(() => {
+    const validPayments = payments.filter((p) => {
+      if (p.status === 'Voided') return false;
+      const d = (p.paymentDate || '').slice(0, 10);
+      if (activeDateRange.startDate && d < activeDateRange.startDate) return false;
+      if (activeDateRange.endDate && d > activeDateRange.endDate) return false;
+      return true;
+    });
+
+    const totalIncome = validPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+
+    return INCOME_CATEGORIES.map((cat) => {
+      const catPayments = validPayments.filter((p) => {
+        const c = p.category || (p.bookingId ? 'Hall Booking' : 'Other Income');
+        return c.toLowerCase() === cat.toLowerCase();
+      });
+      const amount = catPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      const count = catPayments.length;
+      const percentage = totalIncome > 0 ? Math.round((amount / totalIncome) * 100) : 0;
+      return { category: cat, amount, count, percentage };
+    });
+  }, [payments, activeDateRange]);
+
+  // Category counts and totals for Expense Report (Phase 3E)
+  const expenseCategoryReportData = useMemo(() => {
+    const validExpenses = expenses.filter((e) => {
+      const d = (e.expenseDate || '').slice(0, 10);
+      if (activeDateRange.startDate && d < activeDateRange.startDate) return false;
+      if (activeDateRange.endDate && d > activeDateRange.endDate) return false;
+      return true;
+    });
+
+    const totalExpenses = validExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+    return EXPENSE_CATEGORIES.map((cat) => {
+      const catExpenses = validExpenses.filter((e) => (e.category || '').toLowerCase() === cat.toLowerCase());
+      const amount = catExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      const count = catExpenses.length;
+      const percentage = totalExpenses > 0 ? Math.round((amount / totalExpenses) * 100) : 0;
+      return { category: cat, amount, count, percentage };
+    });
+  }, [expenses, activeDateRange]);
 
   const isLoading = isLoadingPayments || isLoadingExpenses || isLoadingBookings;
   const hasNoFinancialData = payments.length === 0 && expenses.length === 0 && bookings.length === 0;
+
+  // Custom range apply handler
+  const handleApplyCustomRange = (e) => {
+    e.preventDefault();
+    if (!customStartDate || !customEndDate) {
+      showError('Please select both start and end dates for the custom range.');
+      return;
+    }
+    if (customStartDate > customEndDate) {
+      showError('Start date cannot be later than end date.');
+      return;
+    }
+    setAppliedCustomRange({ startDate: customStartDate, endDate: customEndDate });
+  };
 
   // Expense action handlers
   const handleOpenAddExpense = () => {
@@ -450,6 +617,16 @@ export default function AccountsDashboardView() {
     }
   };
 
+  // Export CSV handler
+  const handleExportCSV = () => {
+    if (filteredLedgerTransactions.length === 0) {
+      showError('No transactions available in current filter to export.');
+      return;
+    }
+    exportLedgerToCSV(filteredLedgerTransactions);
+    showSuccess(`Exported ${filteredLedgerTransactions.length} transactions to CSV.`);
+  };
+
   return (
     <div className="accounts-dashboard animate-fade-in">
       {/* Toast: Success */}
@@ -473,9 +650,9 @@ export default function AccountsDashboardView() {
         <div className="welcome-content">
           <div className="welcome-badge">
             <Sparkles size={13} />
-            <span>VLNS Gardens Accounts & Finance • Phase 2</span>
+            <span>VLNS Gardens Accounts & Finance • Overview</span>
           </div>
-          <h2 className="welcome-title">Financial Performance & Ledger</h2>
+          <h2 className="welcome-title">Financial Performance & Overview</h2>
           <p className="welcome-desc">
             Real-time tracking of venue income, vendor commissions, operational expenses, profit margins, and customer receivables.
           </p>
@@ -485,6 +662,15 @@ export default function AccountsDashboardView() {
             <div className="sync-dot"></div>
             <span>Live Firestore Sync</span>
           </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => onNavigate?.('financial-reports')}
+            style={{ gap: '5px' }}
+          >
+            <BarChart3 size={15} />
+            <span>Reports & Insights</span>
+          </button>
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -503,6 +689,87 @@ export default function AccountsDashboardView() {
             <span>Add Expense</span>
           </button>
         </div>
+      </div>
+
+      {/* Financial Period Filter Card */}
+      <div className="card period-filter-card">
+        <div className="period-filter-row">
+          <div className="period-presets-group">
+            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px', marginRight: '4px' }}>
+              <Filter size={14} />
+              <span>Financial Period:</span>
+            </span>
+
+            {[
+              { id: 'this_month', label: 'This Month' },
+              { id: 'today', label: 'Today' },
+              { id: 'last_month', label: 'Last Month' },
+              { id: 'all_time', label: 'All Time' },
+              { id: 'custom', label: 'Custom Range' }
+            ].map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`period-tab-btn ${selectedPeriod === p.id ? 'active' : ''}`}
+                onClick={() => setSelectedPeriod(p.id)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span className="badge badge-gold" style={{ fontSize: '11.5px', padding: '4px 10px' }}>
+              <Calendar size={12} style={{ marginRight: '4px' }} />
+              {activeDateRange.label}
+            </span>
+          </div>
+        </div>
+
+        {/* Custom Range Inputs when 'custom' is active */}
+        {selectedPeriod === 'custom' && (
+          <form onSubmit={handleApplyCustomRange} className="period-custom-form animate-fade-in">
+            <div className="period-date-input-wrap">
+              <span>From:</span>
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                required
+              />
+            </div>
+            <div className="period-date-input-wrap">
+              <span>To:</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="btn btn-primary btn-sm"
+              style={{ padding: '5px 14px', fontSize: '12px' }}
+            >
+              Apply Range
+            </button>
+            {(appliedCustomRange.startDate || appliedCustomRange.endDate) && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ padding: '5px 12px', fontSize: '12px' }}
+                onClick={() => {
+                  setCustomStartDate('');
+                  setCustomEndDate('');
+                  setAppliedCustomRange({ startDate: '', endDate: '' });
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </form>
+        )}
       </div>
 
       {/* Error Banner */}
@@ -531,7 +798,7 @@ export default function AccountsDashboardView() {
         </div>
       ) : (
         <>
-          {/* 6 Core Financial KPI Cards */}
+          {/* 6 Core Financial KPI Cards (Driven by selected period) */}
           <div className="accounts-kpi-grid">
             {/* 1. Total Income */}
             <div className="kpi-card kpi-income">
@@ -549,7 +816,7 @@ export default function AccountsDashboardView() {
                 </div>
               </div>
               <div className="kpi-footer">
-                <span>Bookings & vendor commissions</span>
+                <span>{activeDateRange.label}</span>
               </div>
             </div>
 
@@ -569,12 +836,17 @@ export default function AccountsDashboardView() {
                 </div>
               </div>
               <div className="kpi-footer">
-                <span>Operating & maintenance bills</span>
+                <span>{activeDateRange.label}</span>
               </div>
             </div>
 
             {/* 3. Net Profit */}
-            <div className="kpi-card kpi-profit">
+            <div
+              className="kpi-card kpi-profit"
+              onClick={() => onNavigate?.('financial-reports')}
+              style={{ cursor: 'pointer' }}
+              title="Click to view detailed Financial Reports & Business Insights"
+            >
               <div className="kpi-top">
                 <div className={`kpi-icon-box ${summary.netProfit >= 0 ? 'icon-profit-pos' : 'icon-profit-neg'}`}>
                   {summary.netProfit >= 0 ? <TrendingUp size={22} /> : <TrendingDown size={22} />}
@@ -587,18 +859,27 @@ export default function AccountsDashboardView() {
                 <div className="kpi-value">{formatINR(summary.netProfit)}</div>
                 <div className="kpi-title">Net Profit</div>
                 <div className="kpi-subtitle">
-                  {summary.totalIncome > 0 
-                    ? `${((summary.netProfit / summary.totalIncome) * 100).toFixed(1)}% net margin` 
+                  {summary.totalIncome > 0
+                    ? `${((summary.netProfit / summary.totalIncome) * 100).toFixed(1)}% net margin`
                     : 'Revenue minus expenses'}
                 </div>
               </div>
-              <div className="kpi-footer">
+              <div className="kpi-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>Income minus total expenses</span>
+                <span style={{ color: 'var(--brand-gold-light)', fontWeight: 600, fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                  <span>View Reports</span>
+                  <ArrowRight size={12} />
+                </span>
               </div>
             </div>
 
-            {/* 4. Outstanding Receivables */}
-            <div className="kpi-card kpi-receivables">
+            {/* 4. Outstanding Receivables (Clickable with direct link to dedicated Receivables page) */}
+            <div
+              className="kpi-card kpi-receivables"
+              onClick={() => onNavigate?.('receivables')}
+              style={{ cursor: 'pointer', transition: 'all 0.2s ease' }}
+              title="Click to open dedicated Receivables Management view"
+            >
               <div className="kpi-top">
                 <div className="kpi-icon-box icon-receivables">
                   <Clock size={22} />
@@ -608,10 +889,14 @@ export default function AccountsDashboardView() {
               <div className="kpi-body">
                 <div className="kpi-value">{formatINR(summary.totalOutstandingReceivables)}</div>
                 <div className="kpi-title">Outstanding Receivables</div>
-                <div className="kpi-subtitle">Pending customer balances</div>
+                <div className="kpi-subtitle">{receivablesMetrics.totalCount} active bookings with due</div>
               </div>
-              <div className="kpi-footer">
-                <span>From confirmed / tentative bookings</span>
+              <div className="kpi-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Pending balances</span>
+                <span style={{ color: 'var(--brand-gold-light)', fontWeight: 600, fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                  <span>View Receivables</span>
+                  <ArrowRight size={12} />
+                </span>
               </div>
             </div>
 
@@ -631,7 +916,7 @@ export default function AccountsDashboardView() {
                 </div>
               </div>
               <div className="kpi-footer">
-                <span>Receipts collected this month</span>
+                <span>Receipts collected this calendar month</span>
               </div>
             </div>
 
@@ -651,21 +936,21 @@ export default function AccountsDashboardView() {
                 </div>
               </div>
               <div className="kpi-footer">
-                <span>Disbursements paid this month</span>
+                <span>Disbursements paid this calendar month</span>
               </div>
             </div>
           </div>
 
-          {/* Breakdowns Section (2 Columns: Income by Category & Expenses by Category) */}
-          <div className="accounts-breakdowns-grid">
-            {/* 1. Income by Category */}
+          {/* Breakdowns & Financial Reports Section (4 Columns: Income Report, Money Received, Expense Report, Booking Revenue Summary) */}
+          <div className="accounts-breakdowns-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+            {/* 1. Income Report (Phase 3D) */}
             <div className="card breakdown-card">
               <div className="breakdown-header">
                 <div className="breakdown-title-wrap">
                   <CreditCard size={19} className="breakdown-icon" style={{ color: '#34d399' }} />
                   <div>
                     <h3 className="breakdown-title">Income by Category</h3>
-                    <p className="breakdown-subtitle">Distribution of venue revenues across sources</p>
+                    <p className="breakdown-subtitle">Distribution across revenue channels</p>
                   </div>
                 </div>
                 <span className="badge badge-confirmed">
@@ -674,26 +959,69 @@ export default function AccountsDashboardView() {
               </div>
 
               <div className="breakdown-list">
-                {INCOME_CATEGORIES.map((cat) => {
-                  const amount = summary.incomeCategoryBreakdown?.[cat] || 0;
-                  const percentage = summary.totalIncome > 0 
-                    ? Math.round((amount / summary.totalIncome) * 100) 
-                    : 0;
-
-                  const slug = cat.toLowerCase().replace(/\s+/g, '-');
+                {incomeCategoryReportData.map((item) => {
+                  const slug = item.category.toLowerCase().replace(/\s+/g, '-');
 
                   return (
-                    <div key={cat} className="breakdown-row">
+                    <div key={item.category} className="breakdown-row">
                       <div className="row-info">
-                        <span className="row-name">{cat}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span className="row-name">{item.category}</span>
+                          <span className="report-count-tag">{item.count} {item.count === 1 ? 'receipt' : 'receipts'}</span>
+                        </div>
+                        <div className="row-amount-wrap">
+                          <span className="row-amount">{formatINR(item.amount)}</span>
+                          <span className="row-percentage">({item.percentage}%)</span>
+                        </div>
+                      </div>
+                      <div className="progress-track">
+                        <div
+                          className={`progress-fill progress-income-${slug}`}
+                          style={{ width: `${item.percentage}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 2. Money Received by Payment Method */}
+            <div className="card breakdown-card">
+              <div className="breakdown-header">
+                <div className="breakdown-title-wrap">
+                  <Wallet size={19} className="breakdown-icon" style={{ color: 'var(--brand-gold-light)' }} />
+                  <div>
+                    <h3 className="breakdown-title">Money Received</h3>
+                    <p className="breakdown-subtitle">Recorded receipts by channel (not bank balance)</p>
+                  </div>
+                </div>
+                <span className="badge badge-gold">
+                  {formatINR(summary.totalIncome)}
+                </span>
+              </div>
+
+              <div className="breakdown-list">
+                {PAYMENT_METHODS.map((method) => {
+                  const amount = summary.paymentMethodBreakdown?.[method] || 0;
+                  const percentage = summary.totalIncome > 0
+                    ? Math.round((amount / summary.totalIncome) * 100)
+                    : 0;
+
+                  const slug = method.toLowerCase().replace(/\s+/g, '-');
+
+                  return (
+                    <div key={method} className="breakdown-row">
+                      <div className="row-info">
+                        <span className="row-name">{method}</span>
                         <div className="row-amount-wrap">
                           <span className="row-amount">{formatINR(amount)}</span>
                           <span className="row-percentage">({percentage}%)</span>
                         </div>
                       </div>
                       <div className="progress-track">
-                        <div 
-                          className={`progress-fill progress-income-${slug}`}
+                        <div
+                          className={`progress-fill progress-method-${slug}`}
                           style={{ width: `${percentage}%` }}
                         />
                       </div>
@@ -703,7 +1031,7 @@ export default function AccountsDashboardView() {
               </div>
             </div>
 
-            {/* 2. Expenses by Category */}
+            {/* 3. Expense Report (Phase 3E) */}
             <div className="card breakdown-card">
               <div className="breakdown-header">
                 <div className="breakdown-title-wrap">
@@ -719,25 +1047,23 @@ export default function AccountsDashboardView() {
               </div>
 
               <div className="breakdown-list category-scroll-list">
-                {EXPENSE_CATEGORIES.map((category) => {
-                  const amount = summary.expenseCategoryBreakdown[category] || 0;
-                  const percentage = summary.totalExpenses > 0 
-                    ? Math.round((amount / summary.totalExpenses) * 100) 
-                    : 0;
-
+                {expenseCategoryReportData.map((item) => {
                   return (
-                    <div key={category} className="breakdown-row">
+                    <div key={item.category} className="breakdown-row">
                       <div className="row-info">
-                        <span className="row-name">{category}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span className="row-name">{item.category}</span>
+                          <span className="report-count-tag">{item.count} {item.count === 1 ? 'bill' : 'bills'}</span>
+                        </div>
                         <div className="row-amount-wrap">
-                          <span className="row-amount">{formatINR(amount)}</span>
-                          <span className="row-percentage">({percentage}%)</span>
+                          <span className="row-amount">{formatINR(item.amount)}</span>
+                          <span className="row-percentage">({item.percentage}%)</span>
                         </div>
                       </div>
                       <div className="progress-track">
-                        <div 
+                        <div
                           className="progress-fill progress-fill-expense"
-                          style={{ width: `${percentage}%` }}
+                          style={{ width: `${item.percentage}%` }}
                         />
                       </div>
                     </div>
@@ -745,6 +1071,426 @@ export default function AccountsDashboardView() {
                 })}
               </div>
             </div>
+
+            {/* 4. Booking Revenue vs Actual Cash Summary (Phase 3G & 3F) */}
+            <div className="card breakdown-card">
+              <div className="breakdown-header">
+                <div className="breakdown-title-wrap">
+                  <Building2 size={19} className="breakdown-icon" style={{ color: 'var(--brand-gold)' }} />
+                  <div>
+                    <h3 className="breakdown-title">Booking Revenue vs Cash</h3>
+                    <p className="breakdown-subtitle">Contracted bookings vs actual cash flow</p>
+                  </div>
+                </div>
+                <span className="badge badge-gold">
+                  {summary.activeBookingsCount} Active
+                </span>
+              </div>
+
+              <div className="breakdown-list" style={{ gap: '10px' }}>
+                <div className="receivables-summary-item" style={{ padding: '8px 12px' }}>
+                  <span className="receivables-summary-label">Total Contracted Amount</span>
+                  <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                    {formatINR(summary.totalContractedAmount)}
+                  </span>
+                  <span className="receivables-summary-sub">Total business booked (NOT actual revenue)</span>
+                </div>
+
+                <div className="receivables-summary-item" style={{ padding: '8px 12px' }}>
+                  <span className="receivables-summary-label">Received Against Bookings</span>
+                  <span style={{ fontSize: '15px', fontWeight: 700, color: '#34d399', fontFamily: 'var(--font-mono)' }}>
+                    {formatINR(summary.totalReceivedOnBookings)}
+                  </span>
+                  <span className="receivables-summary-sub">Advances & full settlements collected</span>
+                </div>
+
+                <div
+                  className="receivables-summary-item"
+                  style={{ padding: '8px 12px', cursor: 'pointer', transition: 'all 0.15s ease' }}
+                  onClick={() => onNavigate?.('receivables')}
+                  title="Click to view Receivables Management"
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="receivables-summary-label">Outstanding Receivables</span>
+                    <span style={{ color: 'var(--brand-gold-light)', fontSize: '11px', fontWeight: 600 }}>Manage →</span>
+                  </div>
+                  <span style={{ fontSize: '15px', fontWeight: 700, color: '#fbbf24', fontFamily: 'var(--font-mono)' }}>
+                    {formatINR(summary.totalOutstandingReceivables)}
+                  </span>
+                  <span className="receivables-summary-sub">Pending customer balances due</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* PHASE 3C — UNIFIED TRANSACTION LEDGER SECTION */}
+          <div className="card unified-ledger-card">
+            {/* Header */}
+            <div className="ledger-header">
+              <div className="breakdown-title-wrap">
+                <Receipt size={20} className="breakdown-icon" style={{ color: '#34d399' }} />
+                <div>
+                  <h3 className="breakdown-title">Unified Transaction Ledger</h3>
+                  <p className="breakdown-subtitle">
+                    Complete chronological record of all income receipts, vendor commissions, and operational disbursements
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    const periodExpenses = expenses.filter((e) => {
+                      const d = (e.expenseDate || '').slice(0, 10);
+                      if (activeDateRange.startDate && d < activeDateRange.startDate) return false;
+                      if (activeDateRange.endDate && d > activeDateRange.endDate) return false;
+                      return true;
+                    });
+                    if (periodExpenses.length === 0) {
+                      showError('No expenses recorded for the selected period.');
+                      return;
+                    }
+                    exportExpensesToCSV(periodExpenses, activeDateRange, activeDateRange.label);
+                    showSuccess(`Exported ${periodExpenses.length} expense records to CSV.`);
+                  }}
+                  disabled={expenses.length === 0}
+                  title="Export operational expense records for this period"
+                  style={{ gap: '5px' }}
+                >
+                  <Download size={14} style={{ color: '#f87171' }} />
+                  <span>Export Expenses CSV</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleExportCSV}
+                  disabled={filteredLedgerTransactions.length === 0}
+                  title="Export filtered transactions to CSV"
+                  style={{ gap: '5px' }}
+                >
+                  <Download size={14} />
+                  <span>Export Ledger CSV</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filtered Ledger Totals Banner (Phase 3C-C) */}
+            <div className="ledger-totals-grid">
+              <div className="ledger-totals-item">
+                <span className="receivables-summary-label">Filtered Income</span>
+                <span className="receivables-summary-val" style={{ color: '#34d399' }}>
+                  {formatINR(ledgerTotals.income)}
+                </span>
+                <span className="receivables-summary-sub">Non-voided receipts in filter</span>
+              </div>
+
+              <div className="ledger-totals-item">
+                <span className="receivables-summary-label">Filtered Expenses</span>
+                <span className="receivables-summary-val" style={{ color: '#f87171' }}>
+                  {formatINR(ledgerTotals.expense)}
+                </span>
+                <span className="receivables-summary-sub">Disbursements in filter</span>
+              </div>
+
+              <div className="ledger-totals-item">
+                <span className="receivables-summary-label">Net Movement</span>
+                <span className="receivables-summary-val" style={{ color: ledgerTotals.net >= 0 ? 'var(--brand-gold-light)' : '#fb7185' }}>
+                  {formatINR(ledgerTotals.net)}
+                </span>
+                <span className="receivables-summary-sub">{ledgerTotals.net >= 0 ? 'Net positive movement' : 'Net deficit movement'}</span>
+              </div>
+
+              <div className="ledger-totals-item">
+                <span className="receivables-summary-label">Transactions</span>
+                <span className="receivables-summary-val">
+                  {ledgerTotals.count} {ledgerTotals.count === 1 ? 'Record' : 'Records'}
+                </span>
+                <span className="receivables-summary-sub">Matching current active filters</span>
+              </div>
+            </div>
+
+            {/* Filters Row (Type, Category, Payment Method, Search) */}
+            <div className="receivables-controls-row">
+              {/* Type Filter Tabs */}
+              <div className="receivables-filter-tabs">
+                {[
+                  { id: 'all', label: `All Transactions (${rawUnifiedTransactions.length})` },
+                  { id: 'income', label: `Income (${payments.length})` },
+                  { id: 'expense', label: `Expenses (${expenses.length})` }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`receivables-tab-btn ${ledgerTypeFilter === tab.id ? 'active' : ''}`}
+                    onClick={() => {
+                      setLedgerTypeFilter(tab.id);
+                      setLedgerCategoryFilter('all');
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Category, Method, Search Controls */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {/* Category Dropdown */}
+                <select
+                  className="expense-category-select"
+                  value={ledgerCategoryFilter}
+                  onChange={(e) => setLedgerCategoryFilter(e.target.value)}
+                  aria-label="Filter by category"
+                >
+                  <option value="all">All Categories</option>
+                  {ledgerTypeFilter !== 'expense' && (
+                    <optgroup label="Income Categories">
+                      {INCOME_CATEGORIES.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {ledgerTypeFilter !== 'income' && (
+                    <optgroup label="Expense Categories">
+                      {EXPENSE_CATEGORIES.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+
+                {/* Payment Method Dropdown */}
+                <select
+                  className="expense-category-select"
+                  value={ledgerMethodFilter}
+                  onChange={(e) => setLedgerMethodFilter(e.target.value)}
+                  aria-label="Filter by payment method"
+                >
+                  <option value="all">All Payment Methods</option>
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+
+                {/* Search Input */}
+                <div className="expense-search-input">
+                  <Search size={14} style={{ color: 'var(--text-disabled)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search party, ref, notes..."
+                    value={ledgerSearch}
+                    onChange={(e) => setLedgerSearch(e.target.value)}
+                    style={{ width: '180px' }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Unified Transactions Table */}
+            {filteredLedgerTransactions.length === 0 ? (
+              <div className="trend-empty-note" style={{ padding: '36px 20px' }}>
+                {ledgerSearch || ledgerTypeFilter !== 'all' || ledgerCategoryFilter !== 'all' || ledgerMethodFilter !== 'all' ? (
+                  <span>No transactions match your active filter or search query in this financial period.</span>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                    <Receipt size={32} style={{ color: 'var(--text-muted)' }} />
+                    <strong style={{ color: 'var(--text-primary)', fontSize: '15px' }}>
+                      No Transactions Recorded
+                    </strong>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                      Transactions recorded via bookings, vendor commissions, or expenses will appear in this unified ledger.
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="trend-table-wrapper">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th>Category</th>
+                      <th>Party / Source</th>
+                      <th>Description</th>
+                      <th>Amount</th>
+                      <th>Payment Method</th>
+                      <th>Reference</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredLedgerTransactions.map((tx) => {
+                      const isIncome = tx.transactionType === 'income';
+                      const isVoided = tx.isVoided;
+
+                      return (
+                        <tr
+                          key={`${tx.transactionType}-${tx.id}`}
+                          className={`animate-fade-in${isVoided ? ' voided-row' : ''}`}
+                          style={isVoided ? { opacity: 0.6 } : {}}
+                        >
+                          {/* Date */}
+                          <td>
+                            <strong style={{ color: 'var(--text-primary)', fontSize: '13px' }}>
+                              {formatDateDisplay(tx.date)}
+                            </strong>
+                          </td>
+
+                          {/* Type */}
+                          <td>
+                            <span className={isIncome ? 'ledger-type-badge-income' : 'ledger-type-badge-expense'}>
+                              {isIncome ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                              <span>{isIncome ? 'Income' : 'Expense'}</span>
+                            </span>
+                          </td>
+
+                          {/* Category */}
+                          <td>
+                            <span className={`badge ${
+                              tx.category === 'Hall Booking'
+                                ? 'badge-gold'
+                                : tx.category === 'Decoration Commission'
+                                ? 'badge-pending'
+                                : tx.category === 'Catering Commission'
+                                ? 'badge-new'
+                                : isIncome
+                                ? 'badge-confirmed'
+                                : 'badge-cancelled'
+                            }`}>
+                              {tx.category}
+                            </span>
+                          </td>
+
+                          {/* Party / Source */}
+                          <td>
+                            <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <User size={12} style={{ color: 'var(--text-muted)' }} />
+                              <span>{tx.party}</span>
+                            </div>
+                          </td>
+
+                          {/* Description */}
+                          <td>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '240px' }}>
+                              <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                {tx.description || '—'}
+                              </span>
+                              {tx.notes && (
+                                <span style={{ fontSize: '11px', color: 'var(--text-disabled)', fontStyle: 'italic' }}>
+                                  {tx.notes}
+                                </span>
+                              )}
+                              {isVoided && tx.voidReason && (
+                                <span style={{ fontSize: '11px', color: '#fb7185' }}>
+                                  Void reason: {tx.voidReason}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Amount */}
+                          <td>
+                            <div style={{
+                              color: isVoided ? 'var(--text-disabled)' : isIncome ? '#34d399' : '#f87171',
+                              fontWeight: 700,
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: '13.5px',
+                              textDecoration: isVoided ? 'line-through' : 'none'
+                            }}>
+                              {isIncome ? `+${formatINR(tx.amount)}` : `-${formatINR(tx.amount)}`}
+                            </div>
+                          </td>
+
+                          {/* Payment Method */}
+                          <td>
+                            <span className="expense-method-tag">
+                              <CreditCard size={11} />
+                              <span>{tx.paymentMethod || 'Cash'}</span>
+                            </span>
+                          </td>
+
+                          {/* Reference */}
+                          <td>
+                            <span style={{ fontSize: '11px', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
+                              {tx.transactionReference ? `Ref: ${tx.transactionReference}` : tx.bookingId ? `Book #${tx.bookingId.slice(0, 6).toUpperCase()}` : '—'}
+                            </span>
+                          </td>
+
+                          {/* Status */}
+                          <td>
+                            <span className={`badge ${isVoided ? 'badge-cancelled' : 'badge-confirmed'}`}>
+                              {tx.status || 'Completed'}
+                            </span>
+                          </td>
+
+                          {/* Actions */}
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              {/* Income void action */}
+                              {isIncome && !isVoided && (
+                                <button
+                                  type="button"
+                                  className="table-action-icon-btn delete-btn"
+                                  onClick={() => setVoidingPayment(tx.raw)}
+                                  title="Void income receipt"
+                                  aria-label={`Void payment #${tx.id.slice(0, 8)}`}
+                                >
+                                  <Ban size={14} />
+                                </button>
+                              )}
+
+                              {/* Expense edit & delete actions */}
+                              {!isIncome && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="table-action-icon-btn edit-btn"
+                                    onClick={() => handleOpenEditExpense(tx.raw)}
+                                    title="Edit expense record"
+                                    aria-label={`Edit expense #${tx.id.slice(0, 8)}`}
+                                  >
+                                    <Edit2 size={14} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="table-action-icon-btn delete-btn"
+                                    onClick={() => setDeletingExpense(tx.raw)}
+                                    title="Delete expense record"
+                                    aria-label={`Delete expense #${tx.id.slice(0, 8)}`}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </>
+                              )}
+
+                              {/* Booking detail drawer link if bookingId exists */}
+                              {tx.bookingId && (
+                                <button
+                                  type="button"
+                                  className="table-action-icon-btn edit-btn"
+                                  onClick={() => {
+                                    const b = bookings.find((item) => item.id === tx.bookingId);
+                                    if (b) setDetailDrawerBooking(b);
+                                  }}
+                                  title="View associated booking reservation"
+                                  aria-label={`View booking #${tx.bookingId.slice(0, 8)}`}
+                                >
+                                  <Eye size={14} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Monthly Financial Trend Section */}
@@ -808,421 +1554,8 @@ export default function AccountsDashboardView() {
               </div>
             ) : (
               <div className="trend-empty-note">
-                <span>No monthly transaction history recorded yet.</span>
+                <span>No monthly transaction history recorded in the selected period.</span>
               </div>
-            )}
-          </div>
-
-          {/* Ledger Section with Tabs (Expenses vs Income Receipts) */}
-          <div className="card expense-ledger-card">
-            <div className="expense-ledger-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', gap: '6px', background: 'var(--bg-surface-elevated)', padding: '3px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                  <button
-                    type="button"
-                    onClick={() => setActiveLedgerTab('expenses')}
-                    style={{
-                      padding: '6px 14px',
-                      fontSize: '12.5px',
-                      fontWeight: 600,
-                      borderRadius: 'var(--radius-sm)',
-                      background: activeLedgerTab === 'expenses' ? 'var(--brand-gold)' : 'transparent',
-                      color: activeLedgerTab === 'expenses' ? '#fff' : 'var(--text-secondary)',
-                      border: 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    Operational Expenses ({expenses.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveLedgerTab('income')}
-                    style={{
-                      padding: '6px 14px',
-                      fontSize: '12.5px',
-                      fontWeight: 600,
-                      borderRadius: 'var(--radius-sm)',
-                      background: activeLedgerTab === 'income' ? 'var(--brand-gold)' : 'transparent',
-                      color: activeLedgerTab === 'income' ? '#fff' : 'var(--text-secondary)',
-                      border: 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    Income Receipts & Commissions ({payments.length})
-                  </button>
-                </div>
-              </div>
-
-              {/* Tab 1: Expense Controls */}
-              {activeLedgerTab === 'expenses' && (
-                <div className="expense-filter-controls">
-                  <select
-                    className="expense-category-select"
-                    value={expenseCategoryFilter}
-                    onChange={(e) => setExpenseCategoryFilter(e.target.value)}
-                  >
-                    <option value="all">All Categories ({expenses.length})</option>
-                    {EXPENSE_CATEGORIES.map((cat) => {
-                      const count = expenses.filter((e) => (e.category || '').toLowerCase() === cat.toLowerCase()).length;
-                      return (
-                        <option key={cat} value={cat}>
-                          {cat} ({count})
-                        </option>
-                      );
-                    })}
-                  </select>
-
-                  <div className="expense-search-input">
-                    <Search size={14} style={{ color: 'var(--text-disabled)' }} />
-                    <input
-                      type="text"
-                      placeholder="Search payee, notes..."
-                      value={expenseSearchQuery}
-                      onChange={(e) => setExpenseSearchQuery(e.target.value)}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={handleOpenAddExpense}
-                  >
-                    <Plus size={14} />
-                    <span>Add Expense</span>
-                  </button>
-                </div>
-              )}
-
-              {/* Tab 2: Income Controls */}
-              {activeLedgerTab === 'income' && (
-                <div className="expense-filter-controls">
-                  <select
-                    className="expense-category-select"
-                    value={incomeCategoryFilter}
-                    onChange={(e) => setIncomeCategoryFilter(e.target.value)}
-                  >
-                    <option value="all">All Income Categories ({payments.length})</option>
-                    {INCOME_CATEGORIES.map((cat) => {
-                      const count = payments.filter((p) => {
-                        const c = p.category || (p.bookingId ? 'Hall Booking' : 'Other Income');
-                        return c.toLowerCase() === cat.toLowerCase();
-                      }).length;
-                      return (
-                        <option key={cat} value={cat}>
-                          {cat} ({count})
-                        </option>
-                      );
-                    })}
-                  </select>
-
-                  <div className="expense-search-input">
-                    <Search size={14} style={{ color: 'var(--text-disabled)' }} />
-                    <input
-                      type="text"
-                      placeholder="Search payer, ref, notes..."
-                      value={incomeSearchQuery}
-                      onChange={(e) => setIncomeSearchQuery(e.target.value)}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={handleOpenAddIncome}
-                  >
-                    <Plus size={14} />
-                    <span>Add Income</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* TAB CONTENT 1: EXPENSES TABLE */}
-            {activeLedgerTab === 'expenses' && (
-              <>
-                {filteredExpenses.length === 0 ? (
-                  <div className="trend-empty-note">
-                    {expenseSearchQuery || expenseCategoryFilter !== 'all' ? (
-                      <span>No expense records match your current filter.</span>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '16px 0' }}>
-                        <span>No operational expense records found in Firestore.</span>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={handleOpenAddExpense}
-                        >
-                          <Plus size={14} />
-                          <span>Record First Expense</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="trend-table-wrapper">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Date & Ref</th>
-                          <th>Category</th>
-                          <th>Payee & Description</th>
-                          <th>Payment Method</th>
-                          <th>Amount</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredExpenses.map((exp) => (
-                          <tr key={exp.id} className="animate-fade-in">
-                            <td>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <strong style={{ color: 'var(--text-primary)', fontSize: '13px' }}>
-                                  {formatDateDisplay(exp.expenseDate)}
-                                </strong>
-                                <span style={{ fontSize: '10.5px', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
-                                  #{exp.id.slice(0, 8).toUpperCase()}
-                                </span>
-                              </div>
-                            </td>
-
-                            <td>
-                              <span className="expense-category-badge">
-                                <Tag size={10} />
-                                <span>{exp.category || 'Other'}</span>
-                              </span>
-                            </td>
-
-                            <td>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '280px' }}>
-                                {exp.payee && (
-                                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                    <User size={12} style={{ color: 'var(--text-muted)' }} />
-                                    <span>{exp.payee}</span>
-                                  </div>
-                                )}
-                                {exp.description && (
-                                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                                    {exp.description}
-                                  </div>
-                                )}
-                                {exp.notes && (
-                                  <div style={{ fontSize: '11px', color: 'var(--text-disabled)', fontStyle: 'italic' }}>
-                                    {exp.notes}
-                                  </div>
-                                )}
-                                {!exp.payee && !exp.description && !exp.notes && (
-                                  <span style={{ color: 'var(--text-disabled)' }}>—</span>
-                                )}
-                              </div>
-                            </td>
-
-                            <td>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span className="expense-method-tag">
-                                  <CreditCard size={11} />
-                                  <span>{exp.paymentMethod || 'Cash'}</span>
-                                </span>
-                                {exp.transactionReference && (
-                                  <span style={{ fontSize: '10.5px', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
-                                    Ref: {exp.transactionReference}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-
-                            <td>
-                              <div className="expense-amount-cell">
-                                {formatINR(exp.amount)}
-                              </div>
-                            </td>
-
-                            <td>
-                              <div className="expense-table-actions">
-                                <button
-                                  type="button"
-                                  className="table-action-icon-btn edit-btn"
-                                  onClick={() => handleOpenEditExpense(exp)}
-                                  title="Edit expense"
-                                  aria-label={`Edit expense #${exp.id.slice(0, 8)}`}
-                                >
-                                  <Edit2 size={15} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="table-action-icon-btn delete-btn"
-                                  onClick={() => setDeletingExpense(exp)}
-                                  title="Delete expense"
-                                  aria-label={`Delete expense #${exp.id.slice(0, 8)}`}
-                                >
-                                  <Trash2 size={15} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* TAB CONTENT 2: INCOME RECEIPTS TABLE */}
-            {activeLedgerTab === 'income' && (
-              <>
-                {filteredIncomePayments.length === 0 ? (
-                  <div className="trend-empty-note">
-                    {incomeSearchQuery || incomeCategoryFilter !== 'all' ? (
-                      <span>No income receipts match your current filter.</span>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '16px 0' }}>
-                        <span>No income receipts recorded yet.</span>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={handleOpenAddIncome}
-                        >
-                          <Plus size={14} />
-                          <span>Record First Income</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="trend-table-wrapper">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Date & Ref</th>
-                          <th>Income Category</th>
-                          <th>Payer / Source</th>
-                          <th>Payment Method</th>
-                          <th>Amount</th>
-                          <th>Status</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredIncomePayments.map((payment) => {
-                          const isVoided = payment.status === 'Voided';
-                          const cat = payment.category || (payment.bookingId ? 'Hall Booking' : 'Other Income');
-
-                          return (
-                            <tr key={payment.id} className={`animate-fade-in${isVoided ? ' voided-row' : ''}`} style={isVoided ? { opacity: 0.6 } : {}}>
-                              {/* Date & Ref */}
-                              <td>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                  <strong style={{ color: 'var(--text-primary)', fontSize: '13px' }}>
-                                    {formatDateDisplay(payment.paymentDate)}
-                                  </strong>
-                                  <span style={{ fontSize: '10.5px', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
-                                    #{payment.id.slice(0, 8).toUpperCase()}
-                                    {payment.bookingId && ` · Book #${payment.bookingId.slice(0, 6)}`}
-                                  </span>
-                                </div>
-                              </td>
-
-                              {/* Category */}
-                              <td>
-                                <span className={`badge ${
-                                  cat === 'Hall Booking'
-                                    ? 'badge-gold'
-                                    : cat === 'Decoration Commission'
-                                    ? 'badge-pending'
-                                    : cat === 'Catering Commission'
-                                    ? 'badge-new'
-                                    : 'badge-confirmed'
-                                }`}>
-                                  {cat}
-                                </span>
-                              </td>
-
-                              {/* Payer / Description */}
-                              <td>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '280px' }}>
-                                  {payment.customerName && (
-                                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                      <User size={12} style={{ color: 'var(--text-muted)' }} />
-                                      <span>{payment.customerName}</span>
-                                    </div>
-                                  )}
-                                  {payment.description && (
-                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                                      {payment.description}
-                                    </div>
-                                  )}
-                                  {payment.notes && (
-                                    <div style={{ fontSize: '11px', color: 'var(--text-disabled)', fontStyle: 'italic' }}>
-                                      {payment.notes}
-                                    </div>
-                                  )}
-                                  {isVoided && payment.voidReason && (
-                                    <div style={{ fontSize: '11px', color: '#fb7185', marginTop: '2px' }}>
-                                      Void reason: {payment.voidReason}
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
-
-                              {/* Payment Method */}
-                              <td>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                  <span className="expense-method-tag">
-                                    <CreditCard size={11} />
-                                    <span>{payment.paymentMethod || 'Cash'}</span>
-                                  </span>
-                                  {payment.transactionReference && (
-                                    <span style={{ fontSize: '10.5px', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
-                                      Ref: {payment.transactionReference}
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-
-                              {/* Amount */}
-                              <td>
-                                <div style={{
-                                  color: isVoided ? 'var(--text-disabled)' : '#34d399',
-                                  fontWeight: 700,
-                                  fontFamily: 'var(--font-mono)',
-                                  fontSize: '13.5px',
-                                  textDecoration: isVoided ? 'line-through' : 'none'
-                                }}>
-                                  {formatINR(payment.amount)}
-                                </div>
-                              </td>
-
-                              {/* Status */}
-                              <td>
-                                <span className={`badge ${isVoided ? 'badge-cancelled' : 'badge-confirmed'}`}>
-                                  {payment.status || 'Completed'}
-                                </span>
-                              </td>
-
-                              {/* Actions */}
-                              <td>
-                                {!isVoided && (
-                                  <button
-                                    type="button"
-                                    className="table-action-icon-btn delete-btn"
-                                    onClick={() => setVoidingPayment(payment)}
-                                    title="Void income receipt"
-                                    aria-label={`Void payment #${payment.id.slice(0, 8)}`}
-                                  >
-                                    <Ban size={15} />
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </>
             )}
           </div>
         </>
@@ -1245,6 +1578,21 @@ export default function AccountsDashboardView() {
         onClose={() => setIsIncomeModalOpen(false)}
         onSave={handleSaveIncome}
       />
+
+      {/* View Booking Detail Drawer for Ledger Rows */}
+      {detailDrawerBooking && (
+        <BookingDetailDrawer
+          booking={detailDrawerBooking}
+          onClose={() => setDetailDrawerBooking(null)}
+          onCollectPayment={async (paymentData) => {
+            const res = await createPayment(paymentData);
+            showSuccess(`Payment of ${formatINR(paymentData.amount)} recorded.`);
+            return res;
+          }}
+          showSuccess={showSuccess}
+          showError={showError}
+        />
+      )}
 
       {/* Delete Expense Dialog */}
       {deletingExpense && (

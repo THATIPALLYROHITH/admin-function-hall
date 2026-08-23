@@ -16,12 +16,14 @@ import {
   ChevronDown,
   Sparkles,
   IndianRupee,
-  CreditCard
+  CreditCard,
+  Printer
 } from 'lucide-react';
 import { useBookings } from '../../context/BookingsContext';
 import { createPayment } from '../../services/paymentsService';
 import BookingModal from './BookingModal';
 import BookingDetailDrawer from './BookingDetailDrawer';
+import BookingReceiptModal from './BookingReceiptModal';
 import EmptyState from '../Common/EmptyState';
 import './Views.css';
 import './BookingModal.css';
@@ -184,6 +186,7 @@ export default function BookingsView() {
 
   // Drawer state (booking detail + payment history panel)
   const [drawerBookingId, setDrawerBookingId] = useState(null);
+  const [receiptModalBooking, setReceiptModalBooking] = useState(null);
 
   // Toast state
   const [successToast, setSuccessToast] = useState('');
@@ -512,6 +515,15 @@ export default function BookingsView() {
                         <button
                           type="button"
                           className="table-action-icon-btn status-btn"
+                          onClick={() => setReceiptModalBooking(booking)}
+                          title="Print official booking confirmation & receipt"
+                          aria-label={`Print confirmation for ${booking.customerName}`}
+                        >
+                          <Printer size={15} style={{ color: 'var(--brand-gold)' }} />
+                        </button>
+                        <button
+                          type="button"
+                          className="table-action-icon-btn status-btn"
                           onClick={() => setDrawerBookingId(booking.id)}
                           title="View payments & collect payment"
                           aria-label={`Payments for ${booking.customerName}`}
@@ -553,6 +565,15 @@ export default function BookingsView() {
         onSave={handleSaveBooking}
         existingBooking={editingBooking}
       />
+
+      {/* Booking Confirmation / Receipt Modal */}
+      {receiptModalBooking && (
+        <BookingReceiptModal
+          isOpen={Boolean(receiptModalBooking)}
+          onClose={() => setReceiptModalBooking(null)}
+          booking={receiptModalBooking}
+        />
+      )}
 
       {/* Delete Confirm Dialog */}
       {deletingBooking && (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   User,
@@ -13,6 +13,8 @@ import {
   Link2,
   Clock
 } from 'lucide-react';
+import { useBookings } from '../../context/BookingsContext';
+import { checkBookingAvailability, getSlotDisplayName } from '../../services/bookingsService';
 import '../Enquiries/EnquiryModal.css';
 import './BookingModal.css';
 
@@ -46,8 +48,16 @@ function formatINRPreview(val) {
   }).format(num);
 }
 
-export default function BookingModal({ isOpen, onClose, onSave, existingBooking = null }) {
+function formatDateLabel(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+export default function BookingModal({ isOpen, onClose, onSave, existingBooking = null, initialData = null }) {
+  const { bookings } = useBookings();
   const isEditMode = Boolean(existingBooking);
+  const isConversionMode = !isEditMode && Boolean(initialData);
 
   // Form state
   const [customerName, setCustomerName] = useState('');
@@ -65,10 +75,21 @@ export default function BookingModal({ isOpen, onClose, onSave, existingBooking 
   const [isSaving, setIsSaving] = useState(false);
   const [advancePaymentMethod, setAdvancePaymentMethod] = useState('Cash');
 
+  // Live Slot Availability & Conflict Check
+  const conflictCheck = useMemo(() => {
+    if (!isOpen || !eventDate || !timeSlot) {
+      return { available: true, conflictingBooking: null };
+    }
+    if (bookingStatus.toLowerCase() === 'cancelled') {
+      return { available: true, conflictingBooking: null };
+    }
+    return checkBookingAvailability(eventDate, timeSlot, bookings, existingBooking?.id);
+  }, [isOpen, eventDate, timeSlot, bookings, existingBooking, bookingStatus]);
+
   // Derived balance preview
   const balancePreview = Math.max(0, (Number(totalAmount) || 0) - (Number(totalPaid) || 0));
 
-  // Populate form when editing or reset on open
+  // Populate form when editing, pre-filling from enquiry, or reset on open
   useEffect(() => {
     if (!isOpen) return;
 
@@ -84,6 +105,20 @@ export default function BookingModal({ isOpen, onClose, onSave, existingBooking 
       setEstimatedGuests(existingBooking.estimatedGuests ? String(existingBooking.estimatedGuests) : '');
       setNotes(existingBooking.notes || '');
       setEnquiryId(existingBooking.enquiryId || '');
+      setAdvancePaymentMethod('Cash');
+    } else if (initialData) {
+      setCustomerName(initialData.customerName || '');
+      setPhoneNumber(initialData.phoneNumber || '');
+      setOccasion(initialData.occasion || OCCASIONS[0]);
+      setEventDate(initialData.eventDate || initialData.targetDate || '');
+      setTimeSlot(initialData.timeSlot || TIME_SLOTS[0]);
+      setTotalAmount(initialData.totalAmount ? String(initialData.totalAmount) : '');
+      setTotalPaid(initialData.totalPaid ? String(initialData.totalPaid) : '0');
+      setBookingStatus(initialData.bookingStatus || 'Confirmed');
+      setEstimatedGuests(initialData.estimatedGuests ? String(initialData.estimatedGuests) : '');
+      setNotes(initialData.notes || '');
+      setEnquiryId(initialData.enquiryId || initialData.id || '');
+      setAdvancePaymentMethod(initialData.advancePaymentMethod || 'Cash');
     } else {
       setCustomerName('');
       setPhoneNumber('');
@@ -96,11 +131,11 @@ export default function BookingModal({ isOpen, onClose, onSave, existingBooking 
       setEstimatedGuests('');
       setNotes('');
       setEnquiryId('');
+      setAdvancePaymentMethod('Cash');
     }
     setFormError('');
     setIsSaving(false);
-    setAdvancePaymentMethod('Cash');
-  }, [isOpen, isEditMode, existingBooking]);
+  }, [isOpen, isEditMode, existingBooking, initialData]);
 
   // ESC key to close
   useEffect(() => {
@@ -155,6 +190,17 @@ export default function BookingModal({ isOpen, onClose, onSave, existingBooking 
       return;
     }
 
+    // --- Live Conflict Check ---
+    if (!conflictCheck.available && bookingStatus.toLowerCase() !== 'cancelled') {
+      const cb = conflictCheck.conflictingBooking;
+      const slotLabel = getSlotDisplayName(cb.timeSlot);
+      const dateFormatted = formatDateLabel(cb.eventDate);
+      setFormError(
+        `Booking conflict: ${dateFormatted} — ${slotLabel} is already reserved for ${cb.customerName || 'another customer'} (${cb.occasion || 'Event'}). Please choose another date or time slot.`
+      );
+      return;
+    }
+
     // Build the payload — let bookingsService derive balanceAmount and paymentStatus
     const bookingData = {
       customerName: customerName.trim(),
@@ -200,14 +246,16 @@ export default function BookingModal({ isOpen, onClose, onSave, existingBooking 
           <div className="modal-header-info">
             <div className="modal-badge">
               <Sparkles size={13} />
-              <span>{isEditMode ? 'Edit Booking Record' : 'New Reservation'}</span>
+              <span>{isEditMode ? 'Edit Booking Record' : isConversionMode ? 'Enquiry Conversion' : 'New Reservation'}</span>
             </div>
             <h2 className="modal-title">
-              {isEditMode ? 'Edit Booking Details' : 'Create Reservation'}
+              {isEditMode ? 'Edit Booking Details' : isConversionMode ? 'Convert Enquiry to Reservation' : 'Create Reservation'}
             </h2>
             <p className="modal-subtitle">
               {isEditMode
                 ? `Editing booking for ${existingBooking?.customerName || 'customer'}`
+                : isConversionMode
+                ? `Pre-filled from Enquiry #${enquiryId || 'record'}. Specify contracted pricing and advance deposit.`
                 : 'Register a new hall reservation for VLNS Gardens.'}
             </p>
           </div>
@@ -381,6 +429,24 @@ export default function BookingModal({ isOpen, onClose, onSave, existingBooking 
               </div>
             </div>
           </div>
+
+          {/* Inline Slot Conflict Warning */}
+          {!conflictCheck.available && (
+            <div className="booking-conflict-alert animate-fade-in">
+              <div className="conflict-alert-header">
+                <AlertCircle size={16} />
+                <span>Booking Conflict Detected</span>
+              </div>
+              <div className="conflict-alert-desc">
+                <strong>
+                  {formatDateLabel(conflictCheck.conflictingBooking.eventDate)} ({getSlotDisplayName(conflictCheck.conflictingBooking.timeSlot)})
+                </strong>{' '}
+                is already reserved for{' '}
+                <strong>{conflictCheck.conflictingBooking.customerName || 'another customer'}</strong> ({conflictCheck.conflictingBooking.occasion || 'Private Event'}).
+              </div>
+              <span className="conflict-alert-tip">Please choose an alternate event date or open time slot before saving.</span>
+            </div>
+          )}
 
           {/* === SECTION: Financials === */}
           <div className="booking-modal-section-label" style={{ marginTop: '4px' }}>Financial Details</div>

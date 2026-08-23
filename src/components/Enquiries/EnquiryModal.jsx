@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  X, 
-  User, 
-  Phone, 
-  Calendar, 
-  Users, 
-  FileText, 
-  Sparkles, 
-  Check, 
+import {
+  X,
+  User,
+  Phone,
+  Calendar,
+  Users,
+  FileText,
+  Sparkles,
+  Check,
   AlertCircle,
   Clock,
-  Building
+  Building,
+  Tag
 } from 'lucide-react';
 import './EnquiryModal.css';
 
@@ -32,12 +33,15 @@ const TIME_SLOTS = [
   'Evening Slot (04:00 PM – 11:00 PM)'
 ];
 
+const MANUAL_ENTRY_STATUSES = ['Contacted', 'Quoted'];
+
 export default function EnquiryModal({ isOpen, onClose, onSave }) {
   const [customerName, setCustomerName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [occasion, setOccasion] = useState(OCCASIONS[0]);
   const [targetDate, setTargetDate] = useState('');
   const [timeSlot, setTimeSlot] = useState(TIME_SLOTS[0]);
+  const [status, setStatus] = useState(MANUAL_ENTRY_STATUSES[0]);
   const [estimatedGuests, setEstimatedGuests] = useState('');
   const [notes, setNotes] = useState('');
   const [formError, setFormError] = useState('');
@@ -48,9 +52,9 @@ export default function EnquiryModal({ isOpen, onClose, onSave }) {
       setCustomerName('');
       setPhoneNumber('');
       setOccasion(OCCASIONS[0]);
-      // Set default target date to tomorrow or empty
       setTargetDate('');
       setTimeSlot(TIME_SLOTS[0]);
+      setStatus(MANUAL_ENTRY_STATUSES[0]);
       setEstimatedGuests('');
       setNotes('');
       setFormError('');
@@ -88,12 +92,18 @@ export default function EnquiryModal({ isOpen, onClose, onSave }) {
       return;
     }
 
+    if (!status) {
+      setFormError('Please select an initial enquiry status.');
+      return;
+    }
+
     onSave({
       customerName,
       phoneNumber,
       occasion,
       targetDate,
       timeSlot,
+      status,
       estimatedGuests,
       notes
     });
@@ -103,7 +113,7 @@ export default function EnquiryModal({ isOpen, onClose, onSave }) {
 
   return (
     <div className="modal-overlay animate-fade-in" onClick={onClose} role="dialog" aria-modal="true">
-      <div 
+      <div
         className="modal-content enquiry-modal-content"
         onClick={(e) => e.stopPropagation()}
       >
@@ -119,8 +129,8 @@ export default function EnquiryModal({ isOpen, onClose, onSave }) {
               Add walk-in, telephonic, or direct customer enquiries to the VLNS Gardens queue.
             </p>
           </div>
-          <button 
-            type="button" 
+          <button
+            type="button"
             className="modal-close-btn"
             onClick={onClose}
             aria-label="Close modal"
@@ -240,6 +250,25 @@ export default function EnquiryModal({ isOpen, onClose, onSave }) {
                 {TIME_SLOTS.map((slot) => (
                   <option key={slot} value={slot}>
                     {slot}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Initial Status (Contacted / Quoted only) */}
+            <div className="form-group">
+              <label className="form-label" htmlFor="status-select">
+                Initial Status <span className="text-required">*</span>
+              </label>
+              <select
+                id="status-select"
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                required
+              >
+                {MANUAL_ENTRY_STATUSES.map((st) => (
+                  <option key={st} value={st}>
+                    {st}
                   </option>
                 ))}
               </select>
