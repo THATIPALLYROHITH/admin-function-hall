@@ -1,75 +1,156 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions for authenticated access & mathematical validation
+    // ============================================================
+    // Authentication
+    // Only the VLNS Gardens production admin account is authorized.
+    // ============================================================
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null
+        && request.auth.uid == 'Ocn0et4fvvfDvCgj3h9GgfSJQqq1';
     }
 
+    // ============================================================
+    // Booking Financial Validation
+    // ============================================================
     function isValidBookingData(data) {
-      return data.totalAmount is number 
+      return data.totalAmount is number
         && data.totalAmount >= 0
-        && data.totalPaid is number 
+        && data.totalPaid is number
         && data.totalPaid >= 0
         && data.totalPaid <= data.totalAmount
         && data.balanceAmount == (data.totalAmount - data.totalPaid)
         && (
-          (data.totalPaid == 0 && data.paymentStatus == 'Pending') ||
-          (data.totalPaid > 0 && data.totalPaid < data.totalAmount && data.paymentStatus == 'Partially Paid') ||
-          (data.totalPaid == data.totalAmount && data.paymentStatus == 'Paid')
+          (data.totalPaid == 0
+            && data.paymentStatus == 'Pending') ||
+
+          (data.totalPaid > 0
+            && data.totalPaid < data.totalAmount
+            && data.paymentStatus == 'Partially Paid') ||
+
+          (data.totalPaid == data.totalAmount
+            && data.paymentStatus == 'Paid')
         )
-        && data.bookingStatus in ['Tentative', 'Confirmed', 'Completed', 'Cancelled'];
+        && data.bookingStatus in [
+          'Tentative',
+          'Confirmed',
+          'Completed',
+          'Cancelled'
+        ];
     }
 
-    // 1. Existing Enquiries Collection (UNCHANGED)
+    // ============================================================
+    // 1. ENQUIRIES
+    // ============================================================
     match /enquiries/{enquiryId} {
+
       allow read, write: if isAuthenticated();
     }
 
-    // 2. Bookings Collection: Strict Financial & Status Consistency
+    // ============================================================
+    // 2. BOOKINGS
+    // ============================================================
     match /bookings/{bookingId} {
+
+      // Read bookings
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidBookingData(request.resource.data);
+
+      // Create or update bookings only when
+      // financial/status consistency is valid.
+      allow create, update: if isAuthenticated()
+                            && isValidBookingData(
+                                 request.resource.data
+                               );
+
+      // Delete booking
       allow delete: if isAuthenticated();
     }
 
-    // 3. Payments Collection: Immutable Financial Receipts with Safe Void Transition
+    // ============================================================
+    // 3. PAYMENTS
+    // ============================================================
     match /payments/{paymentId} {
+
+      // Read payments
       allow read: if isAuthenticated();
-      
-      // Creating a new payment
+
+      // ----------------------------------------------------------
+      // Create payment
+      // ----------------------------------------------------------
       allow create: if isAuthenticated()
                     && request.resource.data.amount is number
                     && request.resource.data.amount > 0
-                    && request.resource.data.paymentMethod in ['Cash', 'UPI', 'Bank Transfer', 'Other']
-                    && request.resource.data.status in ['Completed', 'Voided'];
-      
-      // Controlled update: Monetary amount, date, and bookingId cannot be modified.
-      // Only allows transitioning a 'Completed' receipt to 'Voided'.
+                    && request.resource.data.paymentMethod in [
+                      'Cash',
+                      'UPI',
+                      'Bank Transfer',
+                      'Other'
+                    ]
+                    && request.resource.data.status in [
+                      'Completed',
+                      'Voided'
+                    ];
+
+      // ----------------------------------------------------------
+      // Controlled payment update
+      //
+      // A Completed payment can only become Voided.
+      // Financial identity fields cannot be changed.
+      // ----------------------------------------------------------
       allow update: if isAuthenticated()
-                    && request.resource.data.amount == resource.data.amount
-                    && request.resource.data.paymentDate == resource.data.paymentDate
-                    && request.resource.data.bookingId == resource.data.bookingId
-                    && request.resource.data.paymentMethod == resource.data.paymentMethod
+                    && request.resource.data.amount
+                       == resource.data.amount
+
+                    && request.resource.data.paymentDate
+                       == resource.data.paymentDate
+
+                    && request.resource.data.bookingId
+                       == resource.data.bookingId
+
+                    && request.resource.data.paymentMethod
+                       == resource.data.paymentMethod
+
                     && resource.data.status == 'Completed'
+
                     && request.resource.data.status == 'Voided';
-      
-      // Permanent deletion is disabled to guarantee an immutable accounting audit trail
+
+      // ----------------------------------------------------------
+      // Payments cannot be permanently deleted.
+      // This preserves the financial audit trail.
+      // ----------------------------------------------------------
       allow delete: if false;
     }
 
-    // 4. Expenses Collection: Operational & Venue Disbursements
+    // ============================================================
+    // 4. EXPENSES
+    // ============================================================
     match /expenses/{expenseId} {
+
+      // Read expenses
       allow read: if isAuthenticated();
+
+      // ----------------------------------------------------------
+      // Create or update expenses
+      // ----------------------------------------------------------
       allow create, update: if isAuthenticated()
                             && request.resource.data.amount is number
                             && request.resource.data.amount > 0
                             && request.resource.data.category in [
-                              'Electricity', 'Water', 'Maintenance', 'Cleaning', 
-                              'Staff', 'Decoration', 'Repairs', 'Marketing', 
-                              'Supplies', 'Other'
+                              'Electricity',
+                              'Water',
+                              'Maintenance',
+                              'Cleaning',
+                              'Staff',
+                              'Decoration',
+                              'Repairs',
+                              'Marketing',
+                              'Supplies',
+                              'Other'
                             ];
+
+      // Delete expense
       allow delete: if isAuthenticated();
     }
   }
