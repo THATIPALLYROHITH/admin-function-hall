@@ -13,6 +13,8 @@ import {
   Edit2,
   Trash2,
   AlertCircle,
+  AlertTriangle,
+  Ban,
   ChevronDown,
   Sparkles,
   IndianRupee,
@@ -20,7 +22,7 @@ import {
   Printer
 } from 'lucide-react';
 import { useBookings } from '../../context/BookingsContext';
-import { createPayment } from '../../services/paymentsService';
+import { createPayment, getPaymentsByBookingId } from '../../services/paymentsService';
 import BookingModal from './BookingModal';
 import BookingDetailDrawer from './BookingDetailDrawer';
 import BookingReceiptModal from './BookingReceiptModal';
@@ -53,6 +55,8 @@ function getShortSlot(timeSlot) {
   if (timeSlot.toLowerCase().includes('full')) return 'Full Day';
   return timeSlot;
 }
+
+const formatSlot = getShortSlot;
 
 function getBookingStatusVariant(status) {
   switch ((status || '').toLowerCase()) {
@@ -169,10 +173,73 @@ function DeleteConfirmDialog({ booking, onConfirm, onCancel }) {
   );
 }
 
+// ── Cancel Paid Booking Confirmation Dialog ───────────────────────────────────
+
+function CancelPaidBookingConfirmDialog({ booking, onConfirmCancellation, onCancel }) {
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handleConfirmClick = async () => {
+    setIsProcessing(true);
+    try {
+      await onConfirmCancellation(booking);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="confirm-dialog-overlay animate-fade-in">
+      <div className="confirm-dialog-box" style={{ borderColor: 'rgba(245, 158, 11, 0.4)' }}>
+        <div className="confirm-dialog-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
+          <AlertTriangle size={22} />
+        </div>
+        <div className="confirm-dialog-title">Cancel this booking?</div>
+        <div className="confirm-dialog-desc">
+          <p style={{ margin: '0 0 10px 0', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+            This booking has recorded payments. Cancelling it will void the associated payment receipts so they are no longer counted as realized income. The payment records will remain in the financial audit trail.
+          </p>
+          <div style={{
+            fontSize: '12px',
+            background: 'var(--bg-surface-elevated)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '6px',
+            padding: '10px 12px',
+            textAlign: 'left',
+            color: 'var(--text-muted)'
+          }}>
+            <div><strong>Customer:</strong> {booking?.customerName}</div>
+            <div><strong>Date:</strong> {formatEventDate(booking?.eventDate)} ({formatSlot(booking?.timeSlot)})</div>
+            {Number(booking?.totalPaid) > 0 ? (
+              <div><strong>Total Paid (to be voided):</strong> {formatINR(booking?.totalPaid)}</div>
+            ) : (
+              <div><strong>Payment History:</strong> {formatINR(booking?.totalPaid)} (Audit receipts on file)</div>
+            )}
+          </div>
+        </div>
+        <div className="confirm-dialog-actions">
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onCancel} disabled={isProcessing}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            style={{ background: '#d97706', borderColor: '#b45309' }}
+            onClick={handleConfirmClick}
+            disabled={isProcessing}
+          >
+            <Ban size={14} />
+            <span>{isProcessing ? 'Cancelling & Voiding...' : 'Confirm Cancellation'}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function BookingsView() {
-  const { bookings, isLoading, error, createBooking, updateBooking, deleteBooking } = useBookings();
+  const { bookings, isLoading, error, createBooking, updateBooking, updateBookingStatus, deleteBooking, cancelBooking } = useBookings();
 
   const [activeStatusTab, setActiveStatusTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -183,6 +250,7 @@ export default function BookingsView() {
 
   // Delete confirm state
   const [deletingBooking, setDeletingBooking] = useState(null);
+  const [blockedPaidBooking, setBlockedPaidBooking] = useState(null);
 
   // Drawer state (booking detail + payment history panel)
   const [drawerBookingId, setDrawerBookingId] = useState(null);
@@ -280,8 +348,42 @@ export default function BookingsView() {
     }
   };
 
-  const handleDeleteClick = (booking) => {
+  const handleDeleteClick = async (booking) => {
+    if (!booking) return;
+
+    // 1. Fast check: if in-memory totalPaid > 0, payments definitely exist
+    if (Number(booking.totalPaid) > 0) {
+      setBlockedPaidBooking(booking);
+      return;
+    }
+
+    // 2. Query check: check if any payment documents (Completed or Voided) exist in Firestore
+    try {
+      const existingPayments = await getPaymentsByBookingId(booking.id);
+      if (existingPayments && existingPayments.length > 0) {
+        setBlockedPaidBooking(booking);
+        return;
+      }
+    } catch (err) {
+      console.error('Could not verify payment documents before deletion:', err);
+      showError('Unable to verify payment history. Please try again.');
+      return;
+    }
+
+    // 3. Unpaid booking with zero payment records: open standard Delete confirmation dialog
     setDeletingBooking(booking);
+  };
+
+  const handleConfirmCancellation = async (booking) => {
+    if (!booking) return;
+    try {
+      await cancelBooking(booking.id, 'Booking cancelled by management');
+      showSuccess(`Booking for "${booking.customerName}" cancelled and associated payment receipts voided.`);
+    } catch (err) {
+      showError(err.message || 'Failed to cancel booking and void payment receipts.');
+    } finally {
+      setBlockedPaidBooking(null);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -581,6 +683,15 @@ export default function BookingsView() {
           booking={deletingBooking}
           onConfirm={handleConfirmDelete}
           onCancel={() => setDeletingBooking(null)}
+        />
+      )}
+
+      {/* Cancel Paid Booking Confirm Dialog */}
+      {blockedPaidBooking && (
+        <CancelPaidBookingConfirmDialog
+          booking={blockedPaidBooking}
+          onConfirmCancellation={handleConfirmCancellation}
+          onCancel={() => setBlockedPaidBooking(null)}
         />
       )}
 

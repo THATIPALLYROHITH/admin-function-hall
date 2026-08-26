@@ -74,6 +74,11 @@ export async function createPayment(paymentData) {
 
         if (bookingSnap.exists()) {
           const bData = bookingSnap.data();
+
+          if (bData.bookingStatus === 'Cancelled') {
+            throw new Error('Cannot record payments for a cancelled booking.');
+          }
+
           const currentPaid = Number(bData.totalPaid) || 0;
           const totalAmount = Number(bData.totalAmount) || 0;
 

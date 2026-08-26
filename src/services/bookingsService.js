@@ -437,17 +437,136 @@ export async function updateBookingStatus(id, newStatus) {
 }
 
 /**
- * Delete a booking
+ * Delete a booking (Allowed ONLY if booking has zero paid amount and no recorded payments)
  */
 export async function deleteBooking(id) {
   ensureFirestore();
 
   try {
     const docRef = doc(db, COLLECTION_NAME, id);
+    const bookingSnap = await getDoc(docRef);
+
+    if (bookingSnap.exists()) {
+      const bookingData = bookingSnap.data();
+      const totalPaid = Number(bookingData.totalPaid) || 0;
+
+      // Check if any payment documents exist for this booking
+      const paymentsQuery = query(
+        collection(db, 'payments'),
+        where('bookingId', '==', id)
+      );
+      const paymentsSnap = await getDocs(paymentsQuery);
+
+      if (totalPaid > 0 || !paymentsSnap.empty) {
+        throw new Error(
+          'Cannot delete booking with recorded payments. Cancel the booking instead to preserve the financial audit trail.'
+        );
+      }
+    }
+
     await deleteDoc(docRef);
     return true;
   } catch (err) {
     console.error('Firestore deleteBooking error:', err);
+    throw err;
+  }
+}
+
+/**
+ * Cancel a booking and safely void any completed payment receipts in an atomic transaction
+ * to preserve the financial audit trail while removing from realized income.
+ */
+export async function cancelBooking(id, cancelReason = 'Booking cancelled by administrator', voidedBy = 'admin') {
+  ensureFirestore();
+
+  if (!id) {
+    throw new Error('Booking ID is required to cancel a reservation.');
+  }
+
+  try {
+    // 1. Query the payment document references associated with bookingId before entering the transaction
+    const paymentsQuery = query(
+      collection(db, 'payments'),
+      where('bookingId', '==', id)
+    );
+    const paymentsSnap = await getDocs(paymentsQuery);
+    const paymentDocRefs = paymentsSnap.docs.map((d) => d.ref);
+
+    // 2. Execute atomic transaction
+    return await runTransaction(db, async (transaction) => {
+      // a. Read booking document
+      const bookingRef = doc(db, COLLECTION_NAME, id);
+      const bookingSnap = await transaction.get(bookingRef);
+
+      if (!bookingSnap.exists()) {
+        throw new Error(`Booking #${id} does not exist.`);
+      }
+
+      const bookingData = bookingSnap.data();
+
+      // b. Verify the booking is not already Cancelled
+      if (bookingData.bookingStatus === 'Cancelled') {
+        throw new Error(`Booking #${id} is already cancelled.`);
+      }
+
+      // c. Read every payment document identified by the initial query
+      const paymentSnaps = [];
+      let calculatedCompletedTotal = 0;
+
+      for (const pRef of paymentDocRefs) {
+        const pSnap = await transaction.get(pRef);
+        if (!pSnap.exists()) {
+          throw new Error('Booking payment record not found during cancellation. Please retry.');
+        }
+        const pData = pSnap.data();
+
+        // Calculate total of Completed payments read inside the transaction
+        if (pData.status === 'Completed') {
+          calculatedCompletedTotal += (Number(pData.amount) || 0);
+          paymentSnaps.push({ ref: pRef, data: pData });
+        } else if (pData.status === 'Voided') {
+          // Already voided in a previous operation, do not void again
+        } else {
+          throw new Error(`Payment #${pRef.id} has unexpected status "${pData.status}".`);
+        }
+      }
+
+      // d. Compare calculated Completed-payment total with the booking's current totalPaid
+      const currentPaid = Number(bookingData.totalPaid) || 0;
+      if (currentPaid !== calculatedCompletedTotal) {
+        throw new Error('Booking payment state changed concurrently. Please retry cancellation.');
+      }
+
+      const nowIso = new Date().toISOString();
+
+      // e. Stage atomic writes for all Completed payments -> Voided
+      for (const { ref } of paymentSnaps) {
+        transaction.update(ref, {
+          status: 'Voided',
+          voidReason: (cancelReason || 'Booking cancelled by administrator').trim(),
+          voidedBy: voidedBy || 'admin',
+          voidedAt: nowIso,
+          serverVoidedAt: serverTimestamp(),
+          updatedAt: nowIso,
+          serverUpdatedAt: serverTimestamp()
+        });
+      }
+
+      // f. Stage atomic booking update
+      const totalAmount = Number(bookingData.totalAmount) || 0;
+      transaction.update(bookingRef, {
+        bookingStatus: 'Cancelled',
+        totalPaid: 0,
+        balanceAmount: totalAmount,
+        paymentStatus: 'Pending',
+        updatedAt: nowIso,
+        serverUpdatedAt: serverTimestamp()
+      });
+
+      return true;
+    });
+  } catch (err) {
+    console.error('Firestore atomic cancelBooking error:', err);
     throw err;
   }
 }

@@ -5,6 +5,7 @@ import {
   updateBooking as svcUpdateBooking,
   updateBookingStatus as svcUpdateBookingStatus,
   deleteBooking as svcDeleteBooking,
+  cancelBooking as svcCancelBooking,
 } from '../services/bookingsService';
 import { createPayment } from '../services/paymentsService';
 import { useAuth } from './AuthContext';
@@ -119,6 +120,18 @@ export function BookingsProvider({ children }) {
     }
   };
 
+  // Cancel a booking and void its associated payment receipts
+  const cancelBooking = async (id, reason) => {
+    try {
+      setError(null);
+      await svcCancelBooking(id, reason);
+      return true;
+    } catch (err) {
+      setError(err.message || 'Failed to cancel booking.');
+      throw err;
+    }
+  };
+
   const value = {
     bookings,
     isLoading,
@@ -127,6 +140,7 @@ export function BookingsProvider({ children }) {
     updateBooking,
     updateBookingStatus,
     deleteBooking,
+    cancelBooking,
   };
 
   return (
