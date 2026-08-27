@@ -467,7 +467,7 @@ export default function FinancialReportsView({ onNavigate }) {
         <div className="welcome-content">
           <div className="welcome-badge">
             <Sparkles size={13} />
-            <span>VLNS Gardens Accounts & Finance • Phase 3D</span>
+            <span>VLNS Gardens Accounts & Finance • Reports & Insights</span>
           </div>
           <h2 className="welcome-title">Financial Reports & Business Insights</h2>
           <p className="welcome-desc">

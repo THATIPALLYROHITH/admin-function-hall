@@ -506,14 +506,14 @@ export default function BookingsView() {
             title={
               searchQuery || activeStatusTab !== 'all'
                 ? 'No bookings match your filter'
-                : 'No Bookings Recorded'
+                : 'No Bookings Yet'
             }
             description={
               searchQuery || activeStatusTab !== 'all'
                 ? 'Try adjusting your search query or status filter.'
-                : 'When hall reservations are registered, provisional holds and confirmed dates will appear here with contract details, advance receipts, and slot allocation.'
+                : 'Create a reservation to start managing your venue schedule, contract amounts, payments, and event dates.'
             }
-            tag={searchQuery ? 'Search Filter Active' : 'Phase 2B: Booking Engine Live'}
+            tag={searchQuery ? 'Search Filter Active' : undefined}
             actionText={activeStatusTab === 'all' && !searchQuery ? 'Create First Reservation' : undefined}
             onAction={activeStatusTab === 'all' && !searchQuery ? handleOpenCreate : undefined}
           />

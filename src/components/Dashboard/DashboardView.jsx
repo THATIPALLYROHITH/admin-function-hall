@@ -381,7 +381,7 @@ export default function DashboardView({ onNavigate }) {
           className="exec-action-btn exec-action-btn-gold"
           onClick={() => setIsBookingModalOpen(true)}
         >
-          <Plus size={14} />
+          <Plus size={13} />
           <span>New Booking</span>
         </button>
         <button
@@ -389,7 +389,7 @@ export default function DashboardView({ onNavigate }) {
           className="exec-action-btn"
           onClick={() => setIsEnquiryModalOpen(true)}
         >
-          <Plus size={14} />
+          <Plus size={13} />
           <span>New Inquiry</span>
         </button>
         <button
@@ -398,7 +398,7 @@ export default function DashboardView({ onNavigate }) {
           onClick={() => setIsIncomeModalOpen(true)}
           style={{ color: '#34d399' }}
         >
-          <Plus size={14} />
+          <Plus size={13} />
           <span>Record Income</span>
         </button>
         <button
@@ -407,7 +407,7 @@ export default function DashboardView({ onNavigate }) {
           onClick={() => setIsExpenseModalOpen(true)}
           style={{ color: '#f87171' }}
         >
-          <Plus size={14} />
+          <Plus size={13} />
           <span>Record Expense</span>
         </button>
         <button
@@ -415,7 +415,7 @@ export default function DashboardView({ onNavigate }) {
           className="exec-action-btn"
           onClick={() => onNavigate?.('receivables')}
         >
-          <Clock size={14} style={{ color: '#fbbf24' }} />
+          <Clock size={13} style={{ color: '#fbbf24' }} />
           <span>Receivables</span>
         </button>
         <button
@@ -423,7 +423,7 @@ export default function DashboardView({ onNavigate }) {
           className="exec-action-btn"
           onClick={() => onNavigate?.('financial-reports')}
         >
-          <BarChart3 size={14} style={{ color: 'var(--brand-gold-light)' }} />
+          <BarChart3 size={13} style={{ color: 'var(--brand-gold-light)' }} />
           <span>Reports & Insights</span>
         </button>
       </div>
@@ -705,7 +705,7 @@ export default function DashboardView({ onNavigate }) {
               <EmptyState
                 icon={Calendar}
                 title="No Upcoming Events Scheduled"
-                description="Confirmed banquet reservations will appear here with dates, time slots, and guest counts."
+                description="Confirmed reservations will appear here when events are scheduled."
                 actionText="Create New Booking"
                 onAction={() => setIsBookingModalOpen(true)}
               />

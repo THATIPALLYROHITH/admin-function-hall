@@ -233,13 +233,13 @@ export default function CustomersView() {
         {filteredCustomers.length === 0 ? (
           <EmptyState
             icon={Users}
-            title={searchQuery ? 'No Matching Customers' : 'Customer Directory is Empty'}
+            title={searchQuery ? 'No Matching Customers' : 'No Customers Yet'}
             description={
               searchQuery
                 ? 'No client profile matches your search query. Try clearing the filter.'
-                : 'Customer profiles are automatically organized in real-time as reservations and bookings are recorded.'
+                : 'Customers will automatically appear here when enquiries and bookings are recorded.'
             }
-            tag={searchQuery ? 'Search Filter' : 'Client Ledger'}
+            tag={searchQuery ? 'Search Filter' : undefined}
           />
         ) : (
           <div className="data-table-wrapper">

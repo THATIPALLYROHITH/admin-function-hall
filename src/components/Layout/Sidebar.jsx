@@ -118,7 +118,7 @@ export default function Sidebar({
             <div className="status-indicator-dot"></div>
             <div className="status-info">
               <span className="status-title">System Status</span>
-              <span className="status-desc">Phase 1: Local Admin</span>
+              <span className="status-desc">All Systems Operational</span>
             </div>
           </div>
           <div className="venue-meta">

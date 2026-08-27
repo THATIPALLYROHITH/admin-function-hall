@@ -7,7 +7,7 @@ export default function EmptyState({
   description = "New data will be automatically populated here once synced with the database.",
   actionText = null,
   onAction = null,
-  tag = "Phase 1 Placeholder"
+  tag = null
 }) {
   return (
     <div className="empty-state-container">

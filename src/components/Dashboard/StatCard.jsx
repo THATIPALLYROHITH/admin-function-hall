@@ -29,7 +29,7 @@ export default function StatCard({
       </div>
 
       <div className="stat-card-footer">
-        <span className="stat-status-pill">Phase 1 Placeholder</span>
+        <span className="stat-status-pill">View Details</span>
         <div className="stat-arrow">
           <ArrowUpRight size={14} />
         </div>

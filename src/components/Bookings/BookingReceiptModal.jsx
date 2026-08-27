@@ -15,8 +15,10 @@ import {
   Users,
   MessageSquare,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Info
 } from 'lucide-react';
+import { getVenueSettings } from '../../services/receiptSettingsService';
 import './BookingReceiptModal.css';
 
 function formatINR(val) {
@@ -49,7 +51,7 @@ function formatPrintTimestamp() {
   });
 }
 
-function generateWhatsAppConfirmationMessage(booking) {
+function generateWhatsAppConfirmationMessage(booking, venueSettings) {
   const customerName = (booking.customerName || 'Valued Customer').trim();
   const bookingRef = `#BOOK-${booking.id.slice(0, 8).toUpperCase()}`;
   const occasion = (booking.occasion || 'Event').trim();
@@ -61,11 +63,17 @@ function generateWhatsAppConfirmationMessage(booking) {
   const balanceDue = formatINR(booking.balanceAmount);
   const status = booking.bookingStatus || 'Confirmed';
 
-  return `*VLNS GARDENS — BOOKING CONFIRMATION & RECEIPT*
+  const venueName = (venueSettings.venueName || 'VLNS Gardens').toUpperCase();
+  const venueCategory = venueSettings.venueCategory || 'Luxury Convention Hall & Banquet Lawn';
+  const address = venueSettings.address || 'Warangal, Telangana';
+  const phone = venueSettings.phone || '+91 91000 05724';
+  const email = venueSettings.email || 'vlnsgardens@gmail.com';
+
+  return `*${venueName} — BOOKING CONFIRMATION & RECEIPT*
 
 Dear ${customerName},
 
-Thank you for choosing VLNS Gardens for your special occasion.
+Thank you for choosing ${venueName} for your special occasion.
 
 *BOOKING DETAILS*
 Booking Ref: ${bookingRef}
@@ -80,17 +88,21 @@ Total Contracted Charges: ${totalAmount}
 Amount Paid: ${totalPaid}
 Outstanding Balance: ${balanceDue}
 
-For any queries, decor planning, or venue assistance, please contact VLNS Gardens.
+For any queries, decor planning, or venue assistance, please contact us.
 
-*VLNS Gardens*
-Warangal, Telangana
-Phone: +91 91000 05724`;
+*${venueName}*
+${venueCategory}
+${address}
+Phone: ${phone}
+Email: ${email}`;
 }
 
-export default function BookingReceiptModal({ isOpen, onClose, booking, payments = [] }) {
+export default function BookingReceiptModal({ isOpen, onClose, booking, payments = [], isPreview = false }) {
   const [feedbackMsg, setFeedbackMsg] = useState(null); // { type: 'success' | 'error', text: '' }
 
   if (!isOpen || !booking) return null;
+
+  const venueSettings = getVenueSettings();
 
   const totalAmount = Number(booking.totalAmount) || 0;
   const totalPaid = Number(booking.totalPaid) || 0;
@@ -116,7 +128,7 @@ export default function BookingReceiptModal({ isOpen, onClose, booking, payments
     }
 
     const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
-    const msg = generateWhatsAppConfirmationMessage(booking);
+    const msg = generateWhatsAppConfirmationMessage(booking, venueSettings);
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
 
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -137,19 +149,21 @@ export default function BookingReceiptModal({ isOpen, onClose, booking, payments
         <div className="receipt-controls-bar no-print">
           <div className="receipt-controls-title">
             <Receipt size={16} style={{ color: 'var(--brand-gold)' }} />
-            <span>Booking Confirmation & Receipt Preview</span>
+            <span>{isPreview ? 'Booking Receipt Template Preview' : 'Booking Confirmation & Receipt'}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleSendWhatsApp}
-              style={{ gap: '6px', color: '#25D366', borderColor: 'rgba(37, 211, 102, 0.35)' }}
-              title={`Send booking confirmation message to ${booking.customerName} via WhatsApp`}
-            >
-              <MessageSquare size={15} />
-              <span>Send on WhatsApp</span>
-            </button>
+            {!isPreview && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleSendWhatsApp}
+                style={{ gap: '6px', color: '#25D366', borderColor: 'rgba(37, 211, 102, 0.35)' }}
+                title={`Send booking confirmation message to ${booking.customerName} via WhatsApp`}
+              >
+                <MessageSquare size={15} />
+                <span>Send on WhatsApp</span>
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -180,12 +194,39 @@ export default function BookingReceiptModal({ isOpen, onClose, booking, payments
 
         {/* Printable Document Paper */}
         <div className="receipt-paper" id="printable-booking-receipt">
+          {/* Template Preview Disclaimer (screen only) */}
+          {isPreview && (
+            <div
+              className="no-print"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '8px 12px',
+                marginBottom: '14px',
+                background: 'rgba(245, 158, 11, 0.12)',
+                border: '1px solid rgba(245, 158, 11, 0.35)',
+                borderRadius: 'var(--radius-sm)',
+                color: '#fde68a',
+                fontSize: '12px',
+                lineHeight: 1.4
+              }}
+            >
+              <Info size={15} style={{ flexShrink: 0, color: 'var(--brand-gold)' }} />
+              <span>
+                <strong>Receipt Preview:</strong> Booking and payment details are automatically populated from the selected reservation.
+              </span>
+            </div>
+          )}
+
           {/* Header */}
           <div className="receipt-header">
             <div className="receipt-brand">
-              <h1 className="receipt-venue-name">VLNS GARDENS</h1>
-              <p className="receipt-venue-sub">Luxury Convention Hall & Banquet Lawn</p>
-              <p className="receipt-venue-addr">Warangal, Telangana • Phone: +91 91000 05724</p>
+              <h1 className="receipt-venue-name">{(venueSettings.venueName || 'VLNS GARDENS').toUpperCase()}</h1>
+              <p className="receipt-venue-sub">{venueSettings.venueCategory || 'Luxury Convention Hall & Banquet Lawn'}</p>
+              <p className="receipt-venue-addr">
+                {(venueSettings.address || 'Warangal, Telangana')} • Phone: {venueSettings.phone || '+91 91000 05724'} • Email: {venueSettings.email || 'vlnsgardens@gmail.com'}
+              </p>
             </div>
             <div className="receipt-doc-badge">
               <span className="doc-badge-title">BOOKING CONFIRMATION</span>
@@ -310,10 +351,13 @@ export default function BookingReceiptModal({ isOpen, onClose, booking, payments
           <div className="receipt-terms-box">
             <div className="receipt-box-title">Venue Terms & Booking Guidelines</div>
             <ul className="receipt-terms-list">
-              <li>Balance amount must be fully settled prior to commencement of the event or decor setup.</li>
-              <li>Hall setup and breakdown must strictly adhere to the allotted slot timings.</li>
-              <li>Generator diesel for extra running hours and damages to venue property, if any, will be charged separately.</li>
-              <li>Booking cancellations and slot rescheduling are subject to management approval and cancellation policies.</li>
+              {(venueSettings.termsAndConditions || venueSettings.terms || '')
+                .split('\n')
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .map((term, idx) => (
+                  <li key={idx}>{term}</li>
+                ))}
             </ul>
           </div>
 
@@ -325,7 +369,7 @@ export default function BookingReceiptModal({ isOpen, onClose, booking, payments
             </div>
             <div className="sign-block">
               <div className="sign-line" />
-              <span className="sign-label">Authorized Signatory (VLNS Gardens)</span>
+              <span className="sign-label">{`Authorized Signatory (${venueSettings.venueName || 'VLNS Gardens'})`}</span>
             </div>
           </div>
         </div>

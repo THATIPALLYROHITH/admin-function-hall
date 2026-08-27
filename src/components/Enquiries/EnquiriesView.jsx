@@ -433,16 +433,16 @@ export default function EnquiriesView() {
             title={
               searchQuery || activeFilter !== 'all'
                 ? "No matching enquiries found"
-                : "No Inquiries Recorded Yet"
+                : "No Inquiries Yet"
             }
             description={
               searchQuery || activeFilter !== 'all'
                 ? "Try adjusting your search query or filter selection."
-                : "Inquiries submitted by customers or manually added using the 'Manual Entry' button will appear here with complete contact details and event preferences."
+                : "Customer enquiries submitted through the website or added by staff will appear here."
             }
             actionText="Record First Enquiry"
             onAction={() => setIsModalOpen(true)}
-            tag={searchQuery ? 'Search Filter Active' : 'Phase 1: Manual Entry Ready'}
+            tag={searchQuery ? 'Search Filter Active' : undefined}
           />
         )}
       </div>

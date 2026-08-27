@@ -790,8 +790,8 @@ export default function AccountsDashboardView({ onNavigate }) {
         <div className="card accounts-empty-card">
           <EmptyState
             icon={Wallet}
-            title="No Financial Records Found"
-            message="No payments, bookings, or operational expenses have been recorded in the database yet. When bookings and receipts are added, financial summaries will automatically populate here."
+            title="No Financial Records Yet"
+            description="Income and expense activity will appear here as transactions are recorded."
             actionText="Record First Expense"
             onAction={handleOpenAddExpense}
           />
@@ -1297,10 +1297,10 @@ export default function AccountsDashboardView({ onNavigate }) {
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
                     <Receipt size={32} style={{ color: 'var(--text-muted)' }} />
                     <strong style={{ color: 'var(--text-primary)', fontSize: '15px' }}>
-                      No Transactions Recorded
+                      No Financial Records Yet
                     </strong>
                     <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
-                      Transactions recorded via bookings, vendor commissions, or expenses will appear in this unified ledger.
+                      Income and expense activity will appear here as transactions are recorded.
                     </span>
                   </div>
                 )}
